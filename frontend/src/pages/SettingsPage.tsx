@@ -1,16 +1,14 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Plus, Trash2, RefreshCw } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
-import { isMockMode } from '@/lib/webphone';
-import { generateId } from '@/lib/utils';
-import type { Account } from '@/types';
+import { api } from '@/lib/api';
 
 export function SettingsPage() {
   const accounts = useStore((s) => s.accounts);
   const removeAccount = useStore((s) => s.removeAccount);
-  const addAccount = useStore((s) => s.addAccount);
+  const refreshAccounts = useStore((s) => s.refreshAccounts);
 
   const [showAdd, setShowAdd] = useState(false);
   const [name, setName] = useState('');
@@ -18,6 +16,22 @@ export function SettingsPage() {
   const [clientSecret, setClientSecret] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState<string | null>(null);
+
+  // When the OAuth popup finishes, it posts back and we reload the account list.
+  useEffect(() => {
+    function handler(ev: MessageEvent) {
+      if (!ev.data || typeof ev.data !== 'object') return;
+      if (ev.data.type !== 'rc_oauth_complete') return;
+      if (ev.data.error) {
+        setError(`OAuth failed: ${ev.data.error}`);
+        return;
+      }
+      void refreshAccounts();
+    }
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [refreshAccounts]);
 
   async function submit() {
     setError(null);
@@ -27,41 +41,35 @@ export function SettingsPage() {
     }
     setSubmitting(true);
     try {
-      if (isMockMode) {
-        const id = generateId('acct');
-        const newAcct: Account = {
-          id,
-          name: name.trim(),
-          status: 'connected',
-          createdAt: new Date().toISOString(),
-          numbers: [
-            { id: generateId('n'), accountId: id, number: '+15550000001', label: 'Main', isDefault: false },
-            { id: generateId('n'), accountId: id, number: '+15550000002', label: 'Secondary', isDefault: false },
-            { id: generateId('n'), accountId: id, number: '+15550000003', label: 'Direct', isDefault: false },
-          ],
-        };
-        addAccount(newAcct);
-      } else {
-        const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? '/api'}/accounts`, {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, clientId, clientSecret }),
-        });
-        if (!res.ok) throw new Error((await res.text()) || 'Failed to create account');
-        const { oauthUrl } = (await res.json()) as { oauthUrl: string };
-        // Open RingCentral's OAuth flow in a popup; backend's /oauth/callback
-        // handles the code exchange + sends a postMessage when done.
-        window.open(oauthUrl, 'rc_oauth', 'width=520,height=700');
-      }
+      const { oauthUrl } = await api.createAccount({
+        name: name.trim(),
+        clientId: clientId.trim(),
+        clientSecret: clientSecret.trim(),
+      });
+      // Open RingCentral's OAuth flow in a popup; backend's /oauth/callback
+      // posts back to this window when done.
+      window.open(oauthUrl, 'rc_oauth', 'width=520,height=720');
       setShowAdd(false);
       setName('');
       setClientId('');
       setClientSecret('');
+      await refreshAccounts();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create account');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function refreshTokens(id: string) {
+    setRefreshing(id);
+    try {
+      await api.refreshAccount(id);
+      await refreshAccounts();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setRefreshing(null);
     }
   }
 
@@ -83,7 +91,7 @@ export function SettingsPage() {
         <ul className="divide-y divide-ink-100">
           {accounts.length === 0 && (
             <li className="px-5 py-12 text-center text-sm text-ink-500">
-              No accounts yet. Click "Add account" to get started.
+              No accounts yet. Click "Add account" to connect your first RingCentral tenant.
             </li>
           )}
           {accounts.map((a) => (
@@ -107,13 +115,21 @@ export function SettingsPage() {
                 >
                   {a.status}
                 </Badge>
-                <button className="btn-ghost text-xs" disabled={isMockMode}>
-                  <RefreshCw size={14} /> Refresh tokens
+                <button
+                  className="btn-ghost text-xs"
+                  onClick={() => refreshTokens(a.id)}
+                  disabled={refreshing === a.id}
+                >
+                  <RefreshCw
+                    size={14}
+                    className={refreshing === a.id ? 'animate-spin' : ''}
+                  />
+                  Refresh tokens
                 </button>
                 <button
                   className="btn-ghost text-xs text-red-600 hover:bg-red-50"
                   onClick={() => {
-                    if (confirm(`Remove account "${a.name}"?`)) removeAccount(a.id);
+                    if (confirm(`Remove account "${a.name}"?`)) void removeAccount(a.id);
                   }}
                 >
                   <Trash2 size={14} /> Remove
@@ -127,8 +143,8 @@ export function SettingsPage() {
       <div className="card p-5">
         <h3 className="text-base font-semibold text-ink-900">Audio devices</h3>
         <p className="mt-1 text-sm text-ink-500">
-          Select your microphone and speaker for in-browser calling. The dashboard will use these
-          for every call across all accounts.
+          Select your microphone and speaker for in-browser calling. The dashboard will use
+          these for every call across all accounts.
         </p>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           <label className="block">
@@ -161,8 +177,8 @@ export function SettingsPage() {
         size="md"
       >
         <p className="text-sm text-ink-600">
-          Create a developer app in your RingCentral console with the
-          permissions <code className="rounded bg-ink-100 px-1 py-0.5 font-mono text-xs">
+          Create a developer app in your RingCentral console with the permissions{' '}
+          <code className="rounded bg-ink-100 px-1 py-0.5 font-mono text-xs">
             ReadAccounts, ReadCallLog, CallControl, VoipCalling, ReadPresence
           </code>{' '}
           and the redirect URI{' '}
@@ -218,7 +234,7 @@ export function SettingsPage() {
               Cancel
             </button>
             <button className="btn-primary" disabled={submitting} onClick={submit}>
-              {submitting ? 'Saving…' : isMockMode ? 'Add (demo)' : 'Connect via OAuth'}
+              {submitting ? 'Saving…' : 'Connect via OAuth'}
             </button>
           </div>
         </div>

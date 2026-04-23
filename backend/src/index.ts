@@ -68,7 +68,5 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 app.listen(env.PORT, () => {
   console.log(`> Unified Phone backend listening on :${env.PORT} (${env.NODE_ENV})`);
-  if (env.NODE_ENV === 'production') {
-    startTokenRefreshJob();
-  }
+  startTokenRefreshJob();
 });

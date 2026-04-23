@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { CircleDot, Eye, EyeOff } from 'lucide-react';
 import { useStore } from '@/store/useStore';
-import { isMockMode } from '@/lib/webphone';
+import { api, ApiError } from '@/lib/api';
 
 export function LoginPage() {
   const [email, setEmail] = useState('');
@@ -10,30 +10,20 @@ export function LoginPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const login = useStore((s) => s.login);
-  const loadDemoData = useStore((s) => s.loadDemoData);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      if (isMockMode) {
-        // Mock — accept anything non-empty
-        if (!email || !password) throw new Error('Please enter email and password');
-        login({ email });
-        loadDemoData();
-        return;
-      }
-      const res = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? '/api'}/auth/login`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      if (!res.ok) throw new Error((await res.text()) || 'Sign-in failed');
-      login({ email });
+      await api.login(email, password);
+      await login({ email });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign-in failed');
+      if (err instanceof ApiError && err.status === 401) {
+        setError('Invalid email or password.');
+      } else {
+        setError(err instanceof Error ? err.message : 'Sign-in failed');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -111,17 +101,6 @@ export function LoginPage() {
             >
               {submitting ? 'Signing in…' : 'Sign in'}
             </button>
-
-            {isMockMode && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                <strong>Demo mode:</strong> any email/password works. The app will load 5 sample
-                accounts and 15 numbers. To run against real RingCentral accounts, set
-                <code className="mx-1 rounded bg-amber-100 px-1 py-0.5 font-mono">
-                  VITE_USE_MOCK_WEBPHONE=false
-                </code>
-                and configure the backend.
-              </div>
-            )}
           </form>
         </div>
       </div>

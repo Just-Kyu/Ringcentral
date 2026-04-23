@@ -6,7 +6,8 @@ import type {
   PhoneNumber,
   AppUser,
 } from '@/types';
-import { createWebPhone, type WebPhoneInstance, isMockMode } from '@/lib/webphone';
+import { createWebPhone, type WebPhoneInstance } from '@/lib/webphone';
+import { api } from '@/lib/api';
 import { generateId } from '@/lib/utils';
 
 type SidebarView = 'dialpad' | 'history' | 'numbers' | 'settings';
@@ -15,6 +16,7 @@ interface State {
   // Auth
   user: AppUser | null;
   hydrated: boolean;
+  hydrating: boolean;
 
   // Data
   accounts: Account[];
@@ -35,16 +37,17 @@ interface State {
 }
 
 interface Actions {
-  hydrate: () => void;
-  login: (user: AppUser) => void;
-  logout: () => void;
+  hydrate: () => Promise<void>;
+  login: (user: AppUser) => Promise<void>;
+  logout: () => Promise<void>;
 
-  loadAccounts: (accounts: Account[]) => void;
-  addAccount: (account: Account) => void;
-  removeAccount: (accountId: string) => void;
+  refreshAccounts: () => Promise<void>;
+  loadAccounts: (accounts: Account[]) => Promise<void>;
+  addAccount: (account: Account) => Promise<void>;
+  removeAccount: (accountId: string) => Promise<void>;
 
-  setNumberLabel: (numberId: string, label: string) => void;
-  setDefaultNumber: (numberId: string) => void;
+  setNumberLabel: (numberId: string, label: string) => Promise<void>;
+  setDefaultNumber: (numberId: string) => Promise<void>;
 
   setView: (view: SidebarView) => void;
 
@@ -62,9 +65,6 @@ interface Actions {
   sendDtmf: (callId: string, digit: string) => Promise<void>;
   transfer: (callId: string, target: string) => Promise<void>;
   focusCall: (callId: string) => void;
-
-  // Used by UI to seed mock data
-  loadDemoData: () => void;
 }
 
 function findNumber(accounts: Account[], numberId: string): {
@@ -76,6 +76,14 @@ function findNumber(accounts: Account[], numberId: string): {
     if (n) return { account: a, number: n };
   }
   return null;
+}
+
+async function persistHistoryEntry(entry: Omit<CallLogEntry, 'id'>): Promise<void> {
+  try {
+    await api.recordCall(entry);
+  } catch (e) {
+    console.warn('Failed to persist call log entry:', e);
+  }
 }
 
 function appendHistory(set: (fn: (s: State) => Partial<State>) => void, call: Call) {
@@ -102,11 +110,14 @@ function appendHistory(set: (fn: (s: State) => Partial<State>) => void, call: Ca
     startedAt: new Date(call.startedAt).toISOString(),
   };
   set((s) => ({ callHistory: [entry, ...s.callHistory].slice(0, 500) }));
+  const { id: _, ...persistable } = entry;
+  void persistHistoryEntry(persistable);
 }
 
 export const useStore = create<State & Actions>((set, get) => ({
   user: null,
   hydrated: false,
+  hydrating: false,
   accounts: [],
   callHistory: [],
   incomingQueue: [],
@@ -117,21 +128,50 @@ export const useStore = create<State & Actions>((set, get) => ({
   _phones: new Map(),
   _tickHandle: null,
 
-  hydrate: () => {
-    if (get().hydrated) return;
-    // 1-second tick so duration timers re-render. We avoid storing the time in
-    // state directly to prevent cascade renders for every call concurrently.
-    const handle = window.setInterval(() => {
-      // Only force re-render if there's at least one active call.
-      if (get().activeCalls.length > 0) {
-        set((s) => ({ activeCalls: [...s.activeCalls] }));
+  hydrate: async () => {
+    if (get().hydrated || get().hydrating) return;
+    set({ hydrating: true });
+    try {
+      const me = await api.me();
+      if (me) {
+        set({ user: { email: me.email } });
+        const [accounts, history] = await Promise.all([
+          api.listAccounts(),
+          api.listCallLog({ limit: 200 }),
+        ]);
+        set({ callHistory: history });
+        await get().loadAccounts(accounts);
       }
-    }, 1000);
-    set({ hydrated: true, _tickHandle: handle });
+      // 1-second tick so active-call duration timers re-render.
+      if (get()._tickHandle == null) {
+        const handle = window.setInterval(() => {
+          if (get().activeCalls.length > 0) {
+            set((s) => ({ activeCalls: [...s.activeCalls] }));
+          }
+        }, 1000);
+        set({ _tickHandle: handle });
+      }
+    } finally {
+      set({ hydrated: true, hydrating: false });
+    }
   },
 
-  login: (user) => set({ user }),
-  logout: () => {
+  login: async (user) => {
+    set({ user });
+    const [accounts, history] = await Promise.all([
+      api.listAccounts(),
+      api.listCallLog({ limit: 200 }),
+    ]);
+    set({ callHistory: history });
+    await get().loadAccounts(accounts);
+  },
+
+  logout: async () => {
+    try {
+      await api.logout();
+    } catch (e) {
+      console.warn('logout request failed:', e);
+    }
     const { _phones, _tickHandle } = get();
     _phones.forEach((p) => p.destroy());
     if (_tickHandle != null) clearInterval(_tickHandle);
@@ -148,91 +188,105 @@ export const useStore = create<State & Actions>((set, get) => ({
     });
   },
 
-  loadAccounts: (accounts) => {
-    const { _phones } = get();
-    // Tear down phones for removed accounts
-    const incoming = new Set(accounts.map((a) => a.id));
-    for (const [id, phone] of _phones) {
-      if (!incoming.has(id)) {
+  refreshAccounts: async () => {
+    const accounts = await api.listAccounts();
+    await get().loadAccounts(accounts);
+  },
+
+  loadAccounts: async (accounts) => {
+    const phones = new Map(get()._phones);
+    // Tear down phones for removed or no-longer-connected accounts.
+    const connectedIds = new Set(
+      accounts.filter((a) => a.status === 'connected').map((a) => a.id),
+    );
+    for (const [id, phone] of phones) {
+      if (!connectedIds.has(id)) {
         phone.destroy();
-        _phones.delete(id);
+        phones.delete(id);
       }
     }
-    // Build phones for new accounts
-    for (const account of accounts) {
-      if (account.status !== 'connected') continue;
-      if (_phones.has(account.id)) continue;
-      _phones.set(
-        account.id,
-        createWebPhone(account, {
-          onIncoming: (call) =>
-            set((s) => ({ incomingQueue: [...s.incomingQueue, call] })),
-          onConnected: (callId) => {
-            set((s) => ({
-              activeCalls: s.activeCalls.map((c) =>
-                c.id === callId
-                  ? { ...c, status: 'active', connectedAt: Date.now() }
-                  : c,
-              ),
-            }));
-          },
-          onEnded: (callId) => {
-            const ended =
-              get().activeCalls.find((c) => c.id === callId) ??
-              get().incomingQueue.find((c) => c.id === callId);
-            if (ended) {
-              // Preserve voicemail status set by sendToVoicemail; otherwise infer.
-              const finalStatus =
-                ended.status === 'voicemail'
-                  ? 'voicemail'
-                  : ended.status === 'ringing'
-                    ? 'missed'
-                    : 'ended';
-              appendHistory(set, {
-                ...ended,
-                status: finalStatus,
-                endedAt: Date.now(),
-              });
-            }
-            set((s) => ({
-              activeCalls: s.activeCalls.filter((c) => c.id !== callId),
-              incomingQueue: s.incomingQueue.filter((c) => c.id !== callId),
-              focusedCallId:
-                s.focusedCallId === callId
-                  ? (s.activeCalls.find((c) => c.id !== callId)?.id ?? null)
-                  : s.focusedCallId,
-            }));
-          },
-          onError: (accountId, message) => {
-            console.error(`[webphone:${accountId}]`, message);
-          },
-        }),
-      );
-    }
+    // Build phones for newly-connected accounts.
+    const toInit = accounts.filter(
+      (a) => a.status === 'connected' && !phones.has(a.id),
+    );
+    await Promise.all(
+      toInit.map(async (account) => {
+        try {
+          const phone = await createWebPhone(account, {
+            onIncoming: (call) =>
+              set((s) => ({ incomingQueue: [...s.incomingQueue, call] })),
+            onConnected: (callId) => {
+              set((s) => ({
+                activeCalls: s.activeCalls.map((c) =>
+                  c.id === callId
+                    ? { ...c, status: 'active', connectedAt: Date.now() }
+                    : c,
+                ),
+              }));
+            },
+            onEnded: (callId) => {
+              const ended =
+                get().activeCalls.find((c) => c.id === callId) ??
+                get().incomingQueue.find((c) => c.id === callId);
+              if (ended) {
+                const finalStatus =
+                  ended.status === 'voicemail'
+                    ? 'voicemail'
+                    : ended.status === 'ringing'
+                      ? 'missed'
+                      : 'ended';
+                appendHistory(set, {
+                  ...ended,
+                  status: finalStatus,
+                  endedAt: Date.now(),
+                });
+              }
+              set((s) => ({
+                activeCalls: s.activeCalls.filter((c) => c.id !== callId),
+                incomingQueue: s.incomingQueue.filter((c) => c.id !== callId),
+                focusedCallId:
+                  s.focusedCallId === callId
+                    ? (s.activeCalls.find((c) => c.id !== callId)?.id ?? null)
+                    : s.focusedCallId,
+              }));
+            },
+            onError: (accountId, message) => {
+              console.error(`[webphone:${accountId}]`, message);
+            },
+          });
+          phones.set(account.id, phone);
+        } catch (e) {
+          console.error(`Failed to initialize WebPhone for ${account.name}:`, e);
+        }
+      }),
+    );
+
     const defaultId =
-      get().defaultFromNumberId ??
       accounts.flatMap((a) => a.numbers).find((n) => n.isDefault)?.id ??
+      get().defaultFromNumberId ??
       accounts[0]?.numbers[0]?.id ??
       null;
-    set({ accounts, _phones, defaultFromNumberId: defaultId });
+    set({ accounts, _phones: phones, defaultFromNumberId: defaultId });
   },
 
-  addAccount: (account) => {
+  addAccount: async (account) => {
     set((s) => ({ accounts: [...s.accounts, account] }));
-    get().loadAccounts(get().accounts);
+    await get().loadAccounts(get().accounts);
   },
 
-  removeAccount: (accountId) => {
-    const { _phones } = get();
-    _phones.get(accountId)?.destroy();
-    _phones.delete(accountId);
+  removeAccount: async (accountId) => {
+    await api.deleteAccount(accountId);
+    const phones = new Map(get()._phones);
+    phones.get(accountId)?.destroy();
+    phones.delete(accountId);
     set((s) => ({
       accounts: s.accounts.filter((a) => a.id !== accountId),
-      _phones,
+      _phones: phones,
     }));
   },
 
-  setNumberLabel: (numberId, label) => {
+  setNumberLabel: async (numberId, label) => {
+    await api.updateNumberLabel(numberId, label);
     set((s) => ({
       accounts: s.accounts.map((a) => ({
         ...a,
@@ -243,7 +297,8 @@ export const useStore = create<State & Actions>((set, get) => ({
     }));
   },
 
-  setDefaultNumber: (numberId) => {
+  setDefaultNumber: async (numberId) => {
+    await api.setDefaultNumber(numberId);
     set((s) => ({
       defaultFromNumberId: numberId,
       accounts: s.accounts.map((a) => ({
@@ -295,16 +350,12 @@ export const useStore = create<State & Actions>((set, get) => ({
   decline: async (callId) => {
     const ringing = get().incomingQueue.find((c) => c.id === callId);
     if (!ringing) return;
-    // The WebPhone's onEnded callback handles history (status='ringing' → 'missed')
-    // and removes the entry from the queue.
     await get()._phones.get(ringing.accountId)?.decline(callId);
   },
 
   sendToVoicemail: (callId) => {
     const ringing = get().incomingQueue.find((c) => c.id === callId);
     if (!ringing) return;
-    // Mark the queued call as 'voicemail' so onEnded preserves that status,
-    // then end it. The webphone wrapper handles the rest.
     set((s) => ({
       incomingQueue: s.incomingQueue.map((c) =>
         c.id === callId ? { ...c, status: 'voicemail' } : c,
@@ -316,9 +367,7 @@ export const useStore = create<State & Actions>((set, get) => ({
   hangup: async (callId) => {
     const call = get().activeCalls.find((c) => c.id === callId);
     if (!call) return;
-    const phone = get()._phones.get(call.accountId);
-    await phone?.hangup(callId);
-    // The webphone's onEnded handler does the cleanup + history append.
+    await get()._phones.get(call.accountId)?.hangup(callId);
   },
 
   toggleMute: async (callId) => {
@@ -368,103 +417,4 @@ export const useStore = create<State & Actions>((set, get) => ({
   },
 
   focusCall: (callId) => set({ focusedCallId: callId }),
-
-  loadDemoData: () => {
-    const accounts: Account[] = [
-      {
-        id: 'acct_1',
-        name: 'Premier Trucking',
-        status: 'connected',
-        createdAt: new Date().toISOString(),
-        numbers: [
-          { id: 'n_1', accountId: 'acct_1', number: '+15134930303', label: 'Main Line', isDefault: true },
-          { id: 'n_2', accountId: 'acct_1', number: '+15134930310', label: 'Dispatch', isDefault: false },
-          { id: 'n_3', accountId: 'acct_1', number: '+15134930311', label: 'Driver Hotline', isDefault: false },
-        ],
-      },
-      {
-        id: 'acct_2',
-        name: 'Premier Sales',
-        status: 'connected',
-        createdAt: new Date().toISOString(),
-        numbers: [
-          { id: 'n_4', accountId: 'acct_2', number: '+15551234567', label: 'Sales — Inbound', isDefault: false },
-          { id: 'n_5', accountId: 'acct_2', number: '+15551234568', label: 'Sales — Outbound', isDefault: false },
-          { id: 'n_6', accountId: 'acct_2', number: '+15551234569', label: 'VIP Line', isDefault: false },
-        ],
-      },
-      {
-        id: 'acct_3',
-        name: 'Customer Support',
-        status: 'connected',
-        createdAt: new Date().toISOString(),
-        numbers: [
-          { id: 'n_7', accountId: 'acct_3', number: '+15559876543', label: 'Support Tier 1', isDefault: false },
-          { id: 'n_8', accountId: 'acct_3', number: '+15559876544', label: 'Support Tier 2', isDefault: false },
-          { id: 'n_9', accountId: 'acct_3', number: '+15559876545', label: 'Escalations', isDefault: false },
-        ],
-      },
-      {
-        id: 'acct_4',
-        name: 'Operations',
-        status: 'connected',
-        createdAt: new Date().toISOString(),
-        numbers: [
-          { id: 'n_10', accountId: 'acct_4', number: '+18005550100', label: 'Ops Main', isDefault: false },
-          { id: 'n_11', accountId: 'acct_4', number: '+18005550101', label: 'Yard 1', isDefault: false },
-          { id: 'n_12', accountId: 'acct_4', number: '+18005550102', label: 'Yard 2', isDefault: false },
-        ],
-      },
-      {
-        id: 'acct_5',
-        name: 'Executive',
-        status: 'connected',
-        createdAt: new Date().toISOString(),
-        numbers: [
-          { id: 'n_13', accountId: 'acct_5', number: '+12025551110', label: 'CEO Direct', isDefault: false },
-          { id: 'n_14', accountId: 'acct_5', number: '+12025551111', label: 'COO Direct', isDefault: false },
-          { id: 'n_15', accountId: 'acct_5', number: '+12025551112', label: 'Front Desk', isDefault: false },
-        ],
-      },
-    ];
-    const seedHistory: CallLogEntry[] = [
-      mkLog('inbound', 'Sarah Johnson', '+15125551038', 'acct_1', 'Premier Trucking', '+15134930303', 'Main Line', 142, 'completed', 12),
-      mkLog('outbound', undefined, '+13105557721', 'acct_2', 'Premier Sales', '+15551234568', 'Sales — Outbound', 87, 'completed', 47),
-      mkLog('inbound', 'Acme Logistics', '+18005550199', 'acct_3', 'Customer Support', '+15559876543', 'Support Tier 1', 0, 'missed', 95),
-      mkLog('inbound', 'Carlos Rivera', '+16145559922', 'acct_4', 'Operations', '+18005550101', 'Yard 1', 215, 'completed', 180),
-      mkLog('outbound', undefined, '+19495553084', 'acct_5', 'Executive', '+12025551110', 'CEO Direct', 312, 'completed', 360),
-      mkLog('inbound', 'Emily Park', '+12135551234', 'acct_1', 'Premier Trucking', '+15134930310', 'Dispatch', 0, 'voicemail', 720),
-    ];
-    get().loadAccounts(accounts);
-    set({ callHistory: seedHistory });
-  },
 }));
-
-function mkLog(
-  direction: 'inbound' | 'outbound',
-  remoteName: string | undefined,
-  remoteNumber: string,
-  accountId: string,
-  accountName: string,
-  bizNumber: string,
-  bizLabel: string,
-  durationSec: number,
-  status: CallLogEntry['status'],
-  minutesAgo: number,
-): CallLogEntry {
-  return {
-    id: generateId('log'),
-    accountId,
-    accountName,
-    direction,
-    fromNumber: direction === 'inbound' ? remoteNumber : bizNumber,
-    toNumber: direction === 'inbound' ? bizNumber : remoteNumber,
-    businessNumberUsed: bizNumber,
-    businessNumberLabel: bizLabel,
-    durationSec,
-    status,
-    startedAt: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
-  };
-}
-
-export { isMockMode };

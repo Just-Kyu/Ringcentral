@@ -11,26 +11,10 @@ Built per [`ringcentral-multi-account-app-prompt.md`](./ringcentral-multi-accoun
 - **Frontend** — Vite + React 18 + TypeScript + TailwindCSS + Zustand, plus a thin wrapper
   around `@ringcentral/web-phone` for browser WebRTC.
 - **Backend** — Node 20 + Express + TypeScript + Prisma (PostgreSQL). Owns OAuth, encrypts
-  RingCentral tokens at rest with AES-256-GCM, and proxies SIP provisioning so client
-  secrets never reach the browser.
-- **Demo mode** — out of the box, the frontend runs against a mock WebPhone that synthesizes
-  incoming calls every 30–90s so you can experience the full UI without configuring any
-  RingCentral accounts.
+  RingCentral tokens at rest with AES-256-GCM, proxies SIP provisioning so client secrets
+  never reach the browser, and refreshes access tokens in the background every 5 minutes.
 
-## Quick start (demo mode, no backend)
-
-```bash
-cd frontend
-cp .env.example .env       # leaves VITE_USE_MOCK_WEBPHONE=true
-npm install
-npm run dev
-```
-
-Open http://localhost:5173, sign in with any email/password — the dashboard loads with 5
-sample accounts, 15 labeled numbers, and a steady drip of fake incoming calls so you can
-exercise the answer / hold / mute / transfer / hang-up flows.
-
-## Full local setup (real RingCentral accounts)
+## Local setup
 
 1. **Postgres** — bring up a local Postgres or use a Railway connection string.
 2. **Backend env** — copy `backend/.env.example` to `backend/.env` and fill in:
@@ -40,20 +24,24 @@ exercise the answer / hold / mute / transfer / hang-up flows.
    - `JWT_SECRET` — any long random string
    - `APP_USER_EMAIL` and `APP_USER_PASSWORD_HASH` — generate the hash with
      `node -e "console.log(require('bcryptjs').hashSync('YOURPW', 12))"`
-3. **Frontend env** — copy `frontend/.env.example` to `frontend/.env` and set
-   `VITE_USE_MOCK_WEBPHONE=false` to use real RingCentral.
+   - `APP_BASE_URL` — e.g. `http://localhost:3000` (must match what RingCentral sees for
+     the OAuth redirect)
+3. **Frontend env** — copy `frontend/.env.example` to `frontend/.env` (the defaults are
+   fine for local dev).
 4. **Install + migrate**:
    ```bash
-   npm install              # installs both workspaces
+   npm install
    npm --workspace backend run prisma:generate
    npx --workspace backend prisma migrate dev
    ```
 5. **Run both processes**:
    ```bash
-   npm run dev              # spawns backend on :3000 and frontend on :5173
+   npm run dev
    ```
-6. Sign in, click **Settings → Add account**, paste the Client ID / Secret of one of your
-   five RingCentral developer apps, and walk through the OAuth popup. Repeat for the other
+   Backend is on `:3000`, frontend on `:5173`. Vite proxies `/api/*` to the backend.
+6. Sign in at http://localhost:5173 with `APP_USER_EMAIL` and the password you hashed.
+7. Click **Settings → Add account**, paste the Client ID / Secret of one of your five
+   RingCentral developer apps, and walk through the OAuth popup. Repeat for the other
    four.
 
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for Railway deployment.
@@ -87,7 +75,7 @@ Browser (Chrome)                   Railway (single service)
 ├── package.json                  # root workspace
 ├── frontend/
 │   ├── src/
-│   │   ├── App.tsx               # auth gate
+│   │   ├── App.tsx               # auth gate + hydration
 │   │   ├── pages/                # LoginPage, DashboardPage, Dialpad, History, Numbers, Settings
 │   │   ├── components/
 │   │   │   ├── layout/           # TopBar, Sidebar
@@ -95,14 +83,14 @@ Browser (Chrome)                   Railway (single service)
 │   │   │   ├── dialpad/          # Keypad, FromNumberSelect
 │   │   │   └── ui/               # Button, Badge, Modal
 │   │   ├── store/useStore.ts     # Zustand store, owns calls + accounts + history
-│   │   ├── lib/webphone.ts       # WebPhone wrapper (real + mock)
+│   │   ├── lib/webphone.ts       # @ringcentral/web-phone wrapper
 │   │   ├── lib/api.ts            # typed REST client
 │   │   └── types/                # shared TS types
 │   └── vite.config.ts            # proxies /api to backend in dev
 └── backend/
     ├── prisma/schema.prisma      # AppUser, Account, PhoneNumber, CallLog
     └── src/
-        ├── index.ts              # Express bootstrap
+        ├── index.ts              # Express bootstrap; starts the token-refresh job
         ├── env.ts
         ├── middleware/auth.ts    # JWT cookie session
         ├── services/
@@ -151,6 +139,9 @@ your real production RingCentral tenants. While you're testing, point
 - Sessions are httpOnly + SameSite=Lax cookies, signed with `JWT_SECRET`, expiring after
   24h of inactivity.
 - The `/api/auth` and `/api/oauth` surfaces are rate-limited to 30 req/min per IP.
+- A background sweep runs every 5 minutes and refreshes any OAuth access token that
+  expires within the next 10 minutes. Tokens that can't be refreshed mark their account
+  as `error` in the dashboard so you can re-auth.
 
 ## Scripts
 

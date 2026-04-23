@@ -1,12 +1,20 @@
 /**
- * Thin wrapper around @ringcentral/web-phone with a built-in mock mode.
+ * Thin wrapper around @ringcentral/web-phone.
  *
- * In mock mode (VITE_USE_MOCK_WEBPHONE=true) we do not touch the network and
- * synthesize incoming calls every so often so the UI is fully demonstrable.
- * In real mode we pull SIP provisioning from the backend (which holds the
- * client_secret) and instantiate the real WebPhone SDK.
+ * One wrapper instance per RingCentral account.  The wrapper:
+ *   1. Fetches SIP provisioning from our backend (the backend holds the
+ *      client_secret, so it never reaches the browser).
+ *   2. Starts the SDK which opens a SIP-over-WSS connection to RingCentral.
+ *   3. Surfaces inbound/outbound call events to the Zustand store via
+ *      the `WebPhoneEvents` callbacks.
+ *
+ * The SDK's exact event/method names have shifted between major versions.  If
+ * the SDK you install exposes slightly different shapes, adjust the narrow
+ * adapter methods below (`extractRemote`, `bindSessionEvents`, `invite`).
  */
+import WebPhoneSDK from '@ringcentral/web-phone';
 import type { Account, Call, PhoneNumber } from '@/types';
+import { api } from './api';
 import { generateId } from './utils';
 
 export interface WebPhoneEvents {
@@ -18,6 +26,7 @@ export interface WebPhoneEvents {
 
 export interface WebPhoneInstance {
   accountId: string;
+  ready: Promise<void>;
   startOutbound: (from: PhoneNumber, toNumber: string) => Promise<Call>;
   answer: (callId: string) => Promise<void>;
   decline: (callId: string) => Promise<void>;
@@ -29,182 +38,211 @@ export interface WebPhoneInstance {
   destroy: () => void;
 }
 
-const MOCK = (import.meta.env.VITE_USE_MOCK_WEBPHONE ?? 'true') === 'true';
-
-const FAKE_INCOMING_NAMES = [
-  'Sarah Johnson',
-  'Mike Chen',
-  'Acme Logistics',
-  'Carlos Rivera',
-  undefined,
-  'Emily Park',
-  'Dispatch — Yard 4',
-];
-
-const FAKE_INCOMING_NUMBERS = [
-  '+15125551038',
-  '+13105557721',
-  '+18005550199',
-  '+16145559922',
-  '+19495553084',
-];
-
-function randomFrom<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+// Minimal SIP session shape we rely on. Different SDK versions name these
+// slightly differently — adjust the accessor functions below if needed.
+interface SipSession {
+  id?: string;
+  remoteNumber?: string;
+  remoteName?: string;
+  to?: string;
+  from?: string;
+  answer: () => Promise<void> | void;
+  reject?: () => Promise<void> | void;
+  decline?: () => Promise<void> | void;
+  hangup: () => Promise<void> | void;
+  terminate?: () => Promise<void> | void;
+  hold: () => Promise<void> | void;
+  unhold?: () => Promise<void> | void;
+  mute: () => Promise<void> | void;
+  unmute?: () => Promise<void> | void;
+  sendDtmf?: (digit: string) => Promise<void> | void;
+  dtmf?: (digit: string) => Promise<void> | void;
+  transfer: (target: string) => Promise<void> | void;
+  on: (event: string, listener: (...args: unknown[]) => void) => void;
+  off?: (event: string, listener: (...args: unknown[]) => void) => void;
 }
 
-class MockWebPhone implements WebPhoneInstance {
-  private timer: number | null = null;
-  private active = new Map<string, Call>();
+interface SipSdk {
+  start?: () => Promise<void>;
+  register?: () => Promise<void>;
+  on: (event: string, listener: (session: SipSession) => void) => void;
+  call: (to: string, from?: string) => Promise<SipSession> | SipSession;
+  dispose?: () => Promise<void> | void;
+  destroy?: () => void;
+}
 
-  constructor(
-    public accountId: string,
-    private accountName: string,
-    private numbers: PhoneNumber[],
-    private events: WebPhoneEvents,
-  ) {
-    // Schedule a fake incoming call sometime in the next 30–90 seconds.
-    this.scheduleFakeIncoming();
+function extractRemoteNumber(session: SipSession): string {
+  return session.remoteNumber ?? parseUri(session.from) ?? '';
+}
+
+function extractLocalNumber(session: SipSession): string {
+  return parseUri(session.to) ?? '';
+}
+
+function parseUri(uri: string | undefined): string | undefined {
+  if (!uri) return undefined;
+  // "sip:+15551234567@domain" → "+15551234567"
+  const m = uri.match(/(?:^|<)(?:sip:)?(\+?\d+)@/);
+  return m ? m[1] : undefined;
+}
+
+export async function createWebPhone(
+  account: Account,
+  events: WebPhoneEvents,
+): Promise<WebPhoneInstance> {
+  const sessionsByCallId = new Map<string, SipSession>();
+  const callIdBySession = new WeakMap<SipSession, string>();
+
+  const sipProvision = (await api.sipProvision(account.id)) as {
+    sipInfo?: unknown;
+    sipFlags?: unknown;
+    device?: unknown;
+  };
+
+  // The SDK constructor signature has varied between versions — the common
+  // denominator is a single options argument that carries the provisioning data
+  // and an app identifier used for registration.
+  const sdk = new (WebPhoneSDK as unknown as new (opts: unknown) => SipSdk)({
+    sipInfo: Array.isArray((sipProvision as { sipInfo?: unknown[] }).sipInfo)
+      ? (sipProvision as { sipInfo: unknown[] }).sipInfo[0]
+      : (sipProvision as { sipInfo?: unknown }).sipInfo,
+    appKey: undefined, // Filled server-side; keep undefined to let the SDK use its default.
+    appName: 'Unified Phone Dashboard',
+    appVersion: '1.0.0',
+  });
+
+  const ready = (async () => {
+    if (typeof sdk.start === 'function') await sdk.start();
+    else if (typeof sdk.register === 'function') await sdk.register();
+  })();
+
+  function labelForNumber(bizNumber: string): PhoneNumber | undefined {
+    return account.numbers.find((n) => n.number === bizNumber);
   }
 
-  private scheduleFakeIncoming() {
-    if (this.numbers.length === 0) return;
-    const delay = 30_000 + Math.random() * 60_000;
-    this.timer = window.setTimeout(() => {
-      this.fireFakeIncoming();
-      this.scheduleFakeIncoming();
-    }, delay);
-  }
-
-  private fireFakeIncoming() {
-    const target = randomFrom(this.numbers);
-    const call: Call = {
-      id: generateId('call'),
-      accountId: this.accountId,
-      accountName: this.accountName,
-      direction: 'inbound',
-      status: 'ringing',
-      remoteNumber: randomFrom(FAKE_INCOMING_NUMBERS),
-      remoteName: randomFrom(FAKE_INCOMING_NAMES),
-      businessNumber: target.number,
-      businessNumberLabel: target.label,
-      startedAt: Date.now(),
-      muted: false,
-      onHold: false,
-      recording: false,
-    };
-    this.active.set(call.id, call);
-    this.events.onIncoming(call);
-  }
-
-  async startOutbound(from: PhoneNumber, toNumber: string): Promise<Call> {
-    const call: Call = {
-      id: generateId('call'),
-      accountId: this.accountId,
-      accountName: this.accountName,
-      direction: 'outbound',
-      status: 'connecting',
-      remoteNumber: toNumber,
-      businessNumber: from.number,
-      businessNumberLabel: from.label,
-      startedAt: Date.now(),
-      muted: false,
-      onHold: false,
-      recording: false,
-    };
-    this.active.set(call.id, call);
-    // Simulate network ringing → connected
-    window.setTimeout(() => {
-      const c = this.active.get(call.id);
-      if (!c || c.status === 'ended') return;
-      c.status = 'active';
-      c.connectedAt = Date.now();
-      this.events.onConnected(call.id);
-    }, 1200 + Math.random() * 800);
+  function trackSession(session: SipSession, seed: Omit<Call, 'id'>): Call {
+    const id = generateId('call');
+    const call: Call = { ...seed, id };
+    sessionsByCallId.set(id, session);
+    callIdBySession.set(session, id);
+    bindSessionEvents(session);
     return call;
   }
 
-  async answer(callId: string): Promise<void> {
-    const c = this.active.get(callId);
-    if (!c) return;
-    c.status = 'active';
-    c.connectedAt = Date.now();
-    this.events.onConnected(callId);
+  function bindSessionEvents(session: SipSession) {
+    const id = callIdBySession.get(session);
+    if (!id) return;
+    const onAccepted = () => events.onConnected(id);
+    const onTerminated = () => {
+      sessionsByCallId.delete(id);
+      events.onEnded(id);
+    };
+    // Different SDK versions emit different events — bind all plausible names.
+    session.on('accepted', onAccepted);
+    session.on('answered', onAccepted);
+    session.on('established', onAccepted);
+    session.on('terminated', onTerminated);
+    session.on('bye', onTerminated);
+    session.on('disposed', onTerminated);
+    session.on('failed', onTerminated);
+    session.on('rejected', onTerminated);
   }
 
-  async decline(callId: string): Promise<void> {
-    return this.hangup(callId);
-  }
+  // Incoming invitations from RingCentral land here.
+  const bindIncoming = (session: SipSession) => {
+    const bizNumber = extractLocalNumber(session);
+    const matched = labelForNumber(bizNumber) ?? account.numbers[0];
+    const call = trackSession(session, {
+      accountId: account.id,
+      accountName: account.name,
+      direction: 'inbound',
+      status: 'ringing',
+      remoteNumber: extractRemoteNumber(session),
+      remoteName: session.remoteName,
+      businessNumber: matched?.number ?? bizNumber,
+      businessNumberLabel: matched?.label ?? 'Unlabeled',
+      startedAt: Date.now(),
+      muted: false,
+      onHold: false,
+      recording: false,
+    });
+    events.onIncoming(call);
+  };
 
-  async hangup(callId: string): Promise<void> {
-    const c = this.active.get(callId);
-    if (!c) return;
-    c.status = 'ended';
-    c.endedAt = Date.now();
-    this.active.delete(callId);
-    this.events.onEnded(callId);
-  }
+  sdk.on('invite', bindIncoming);
+  sdk.on('inviteReceived', bindIncoming);
+  sdk.on('inboundCall', bindIncoming);
 
-  async hold(callId: string, on: boolean): Promise<void> {
-    const c = this.active.get(callId);
-    if (!c) return;
-    c.onHold = on;
-    c.status = on ? 'on-hold' : 'active';
-  }
+  return {
+    accountId: account.id,
+    ready,
 
-  async mute(callId: string, on: boolean): Promise<void> {
-    const c = this.active.get(callId);
-    if (!c) return;
-    c.muted = on;
-  }
+    async startOutbound(from, toNumber) {
+      await ready;
+      const session = await Promise.resolve(sdk.call(toNumber, from.number));
+      return trackSession(session, {
+        accountId: account.id,
+        accountName: account.name,
+        direction: 'outbound',
+        status: 'connecting',
+        remoteNumber: toNumber,
+        businessNumber: from.number,
+        businessNumberLabel: from.label,
+        startedAt: Date.now(),
+        muted: false,
+        onHold: false,
+        recording: false,
+      });
+    },
 
-  async sendDtmf(_callId: string, _digit: string): Promise<void> {
-    // No-op in mock — real SDK would send an INFO/RFC2833 frame.
-  }
+    async answer(callId) {
+      const s = sessionsByCallId.get(callId);
+      if (s) await Promise.resolve(s.answer());
+    },
 
-  async transfer(callId: string, _target: string): Promise<void> {
-    return this.hangup(callId);
-  }
+    async decline(callId) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      await Promise.resolve((s.decline ?? s.reject ?? s.hangup).call(s));
+    },
 
-  destroy() {
-    if (this.timer != null) window.clearTimeout(this.timer);
-    this.timer = null;
-    this.active.clear();
-  }
+    async hangup(callId) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      await Promise.resolve((s.hangup ?? s.terminate)!.call(s));
+    },
+
+    async hold(callId, on) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      if (on) await Promise.resolve(s.hold());
+      else await Promise.resolve((s.unhold ?? s.hold).call(s));
+    },
+
+    async mute(callId, on) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      if (on) await Promise.resolve(s.mute());
+      else await Promise.resolve((s.unmute ?? s.mute).call(s));
+    },
+
+    async sendDtmf(callId, digit) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      const fn = s.sendDtmf ?? s.dtmf;
+      if (fn) await Promise.resolve(fn.call(s, digit));
+    },
+
+    async transfer(callId, target) {
+      const s = sessionsByCallId.get(callId);
+      if (!s) return;
+      await Promise.resolve(s.transfer(target));
+    },
+
+    destroy() {
+      sessionsByCallId.clear();
+      if (typeof sdk.dispose === 'function') void sdk.dispose();
+      else if (typeof sdk.destroy === 'function') sdk.destroy();
+    },
+  };
 }
-
-class RealWebPhone implements WebPhoneInstance {
-  // The real implementation is intentionally minimal here — wiring it requires
-  // valid OAuth tokens fetched via the backend's /sip-provision proxy and the
-  // user's microphone permission. The shape mirrors MockWebPhone so the rest of
-  // the app stays identical.
-  constructor(
-    public accountId: string,
-    _account: Account,
-    _events: WebPhoneEvents,
-  ) {
-    throw new Error(
-      'Real WebPhone not initialized in this build. Set VITE_USE_MOCK_WEBPHONE=true ' +
-        'or wire the @ringcentral/web-phone SDK using the SIP provisioning data ' +
-        'returned by POST /api/accounts/:id/sip-provision.',
-    );
-  }
-  startOutbound = async () => { throw new Error('not implemented'); };
-  answer = async () => { throw new Error('not implemented'); };
-  decline = async () => { throw new Error('not implemented'); };
-  hangup = async () => { throw new Error('not implemented'); };
-  hold = async () => { throw new Error('not implemented'); };
-  mute = async () => { throw new Error('not implemented'); };
-  sendDtmf = async () => { throw new Error('not implemented'); };
-  transfer = async () => { throw new Error('not implemented'); };
-  destroy = () => { /* noop */ };
-}
-
-export function createWebPhone(account: Account, events: WebPhoneEvents): WebPhoneInstance {
-  if (MOCK) {
-    return new MockWebPhone(account.id, account.name, account.numbers, events);
-  }
-  return new RealWebPhone(account.id, account, events);
-}
-
-export const isMockMode = MOCK;
