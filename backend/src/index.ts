@@ -1,0 +1,74 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import cookieParser from 'cookie-parser';
+import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+
+import { env } from './env.js';
+import authRoutes from './routes/auth.js';
+import accountsRoutes from './routes/accounts.js';
+import oauthRoutes from './routes/oauth.js';
+import numbersRoutes from './routes/numbers.js';
+import callLogRoutes from './routes/callLog.js';
+import { startTokenRefreshJob } from './jobs/tokenRefresh.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const app = express();
+
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Vite/SDK inline scripts; tighten in production via custom CSP.
+    crossOriginEmbedderPolicy: false,
+  }),
+);
+app.use(express.json({ limit: '256kb' }));
+app.use(cookieParser());
+
+if (env.NODE_ENV !== 'production') {
+  app.use(
+    cors({
+      origin: ['http://localhost:5173', 'http://127.0.0.1:5173'],
+      credentials: true,
+    }),
+  );
+}
+
+// Rate-limit the auth + OAuth surfaces.
+const sensitive = rateLimit({ windowMs: 60_000, max: 30 });
+app.use('/api/auth', sensitive);
+app.use('/api/oauth', sensitive);
+
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.use('/api/auth', authRoutes);
+app.use('/api/accounts', accountsRoutes);
+app.use('/api/oauth', oauthRoutes);
+app.use('/api/numbers', numbersRoutes);
+app.use('/api/call-log', callLogRoutes);
+
+// Production: serve the built frontend bundle.
+if (env.NODE_ENV === 'production') {
+  const staticDir = path.resolve(__dirname, '../../frontend/dist');
+  app.use(express.static(staticDir));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api/')) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(staticDir, 'index.html'));
+  });
+}
+
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err);
+  res.status(500).json({ error: err.message });
+});
+
+app.listen(env.PORT, () => {
+  console.log(`> Unified Phone backend listening on :${env.PORT} (${env.NODE_ENV})`);
+  if (env.NODE_ENV === 'production') {
+    startTokenRefreshJob();
+  }
+});
