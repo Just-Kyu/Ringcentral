@@ -338,10 +338,10 @@ export const useStore = create<State & Actions>((set, get) => ({
     set((s) => ({
       incomingQueue: s.incomingQueue.filter((c) => c.id !== callId),
       activeCalls: [
-        ...s.activeCalls.map((c) =>
+        ...s.activeCalls.map((c): Call =>
           c.status === 'active' ? { ...c, onHold: true, status: 'on-hold' } : c,
         ),
-        { ...ringing, status: 'active', connectedAt: Date.now() },
+        { ...ringing, status: 'active' as const, connectedAt: Date.now() },
       ],
       focusedCallId: callId,
     }));

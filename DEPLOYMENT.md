@@ -35,7 +35,7 @@ In the service's **Variables** tab, add:
 Railway should pick these up from `package.json`, but to be explicit:
 
 - **Install command**: `npm install`
-- **Build command**: `npm run build && npm --workspace backend run prisma:generate`
+- **Build command**: `npm run build`
 - **Start command**: `npm --workspace backend run prisma:migrate && npm start`
 
 The `prisma:migrate` step runs `prisma migrate deploy`, which is safe to run on every
