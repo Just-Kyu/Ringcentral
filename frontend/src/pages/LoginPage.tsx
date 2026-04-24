@@ -38,14 +38,14 @@ export function LoginPage() {
               <CircleDot size={22} />
             </div>
             <div>
-              <div className="text-lg font-semibold text-ink-900">Unified Phone</div>
+              <div className="text-lg font-semibold text-ink-900">Easy Call</div>
               <div className="text-xs text-ink-500">Multi-Account Dashboard</div>
             </div>
           </div>
 
           <h1 className="text-2xl font-semibold text-ink-900">Welcome back</h1>
           <p className="mt-1 text-sm text-ink-500">
-            Sign in to manage all 5 of your RingCentral accounts in one place.
+            Sign in to manage all of your RingCentral accounts in one place.
           </p>
 
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
@@ -109,13 +109,13 @@ export function LoginPage() {
         <div className="flex h-full flex-col justify-end p-12 text-white">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1 text-xs font-medium backdrop-blur">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" />
-            5 accounts · 15 numbers · 1 dashboard
+            Unlimited accounts · Unlimited numbers · 1 dashboard
           </div>
           <h2 className="text-3xl font-semibold leading-tight">
             Every line, every account, in a single browser tab.
           </h2>
           <p className="mt-3 max-w-md text-white/80">
-            Receive incoming calls from any of your 15 business numbers, see exactly which line
+            Receive incoming calls from any of your business numbers, see exactly which line
             was dialed, and place outbound calls from any of them — all over WebRTC, no desk
             phone needed.
           </p>

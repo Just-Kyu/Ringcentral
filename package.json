@@ -1,8 +1,8 @@
 {
-  "name": "ringcentral-unified-dashboard",
+  "name": "easy-call",
   "version": "1.0.0",
   "private": true,
-  "description": "Unified phone dashboard for 5 RingCentral accounts with WebRTC calling",
+  "description": "Easy Call — unified dashboard for unlimited RingCentral accounts with WebRTC calling",
   "workspaces": [
     "frontend",
     "backend"

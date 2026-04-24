@@ -16,7 +16,7 @@ export function TopBar() {
           <CircleDot size={18} />
         </div>
         <div className="flex items-baseline gap-2">
-          <h1 className="text-base font-semibold text-ink-900">Unified Phone</h1>
+          <h1 className="text-base font-semibold text-ink-900">Easy Call</h1>
           <span className="text-xs text-ink-500">Multi-Account Dashboard</span>
         </div>
       </div>

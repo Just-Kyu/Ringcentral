@@ -109,7 +109,9 @@ export function SettingsPage() {
         <div>
           <h3 className="text-base font-semibold text-ink-900">Connected accounts</h3>
           <p className="mt-1 text-sm text-ink-500">
-            {accounts.length} of 5 RingCentral accounts connected.
+            {accounts.length === 1
+              ? '1 RingCentral account connected.'
+              : `${accounts.length} RingCentral accounts connected.`}
           </p>
         </div>
         <button onClick={() => setShowAdd(true)} className="btn-primary">

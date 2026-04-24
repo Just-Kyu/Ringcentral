@@ -112,7 +112,7 @@ export async function createWebPhone(
       ? (sipProvision as { sipInfo: unknown[] }).sipInfo[0]
       : (sipProvision as { sipInfo?: unknown }).sipInfo,
     appKey: undefined, // Filled server-side; keep undefined to let the SDK use its default.
-    appName: 'Unified Phone Dashboard',
+    appName: 'Easy Call',
     appVersion: '1.0.0',
     // Pass microphone device preference; both property names are used across SDK versions.
     constraints: { audio: micConstraint },

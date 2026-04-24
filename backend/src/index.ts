@@ -72,6 +72,6 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 });
 
 app.listen(env.PORT, '0.0.0.0', () => {
-  console.log(`> Unified Phone backend listening on 0.0.0.0:${env.PORT} (${env.NODE_ENV})`);
+  console.log(`> Easy Call backend listening on 0.0.0.0:${env.PORT} (${env.NODE_ENV})`);
   startTokenRefreshJob();
 });
