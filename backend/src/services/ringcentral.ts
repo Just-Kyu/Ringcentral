@@ -17,12 +17,12 @@ const REDIRECT_URI = `${env.APP_BASE_URL}/api/oauth/callback`;
  * access to a particular RingCentral account.  We pack the internal account id
  * into `state` so the callback knows which row to update.
  */
-export function buildAuthorizeUrl(accountId: string, clientId: string): string {
+export function buildAuthorizeUrl(clientId: string, state: string): string {
   const url = new URL(`${env.RINGCENTRAL_SERVER}/restapi/oauth/authorize`);
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('redirect_uri', REDIRECT_URI);
-  url.searchParams.set('state', accountId);
+  url.searchParams.set('state', state);
   url.searchParams.set('scope', SCOPES.join(' '));
   return url.toString();
 }

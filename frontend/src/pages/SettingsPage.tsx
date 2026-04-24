@@ -4,6 +4,7 @@ import { useStore } from '@/store/useStore';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { api } from '@/lib/api';
+import { getAudioPrefs, setAudioPrefs } from '@/lib/utils';
 
 export function SettingsPage() {
   const accounts = useStore((s) => s.accounts);
@@ -18,13 +19,42 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState<string | null>(null);
 
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
+  const [micDeviceId, setMicDeviceId] = useState(getAudioPrefs().micDeviceId ?? '');
+  const [speakerDeviceId, setSpeakerDeviceId] = useState(getAudioPrefs().speakerDeviceId ?? '');
+
+  // Enumerate audio devices. Re-run if the user changes their device selection
+  // (so labels appear after permission is granted on first call).
+  useEffect(() => {
+    async function loadDevices() {
+      if (!navigator.mediaDevices?.enumerateDevices) return;
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setMics(devices.filter((d) => d.kind === 'audioinput'));
+      setSpeakers(devices.filter((d) => d.kind === 'audiooutput'));
+    }
+    void loadDevices();
+    navigator.mediaDevices?.addEventListener?.('devicechange', loadDevices);
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', loadDevices);
+  }, []);
+
+  function handleMicChange(id: string) {
+    setMicDeviceId(id);
+    setAudioPrefs({ ...getAudioPrefs(), micDeviceId: id || undefined });
+  }
+
+  function handleSpeakerChange(id: string) {
+    setSpeakerDeviceId(id);
+    setAudioPrefs({ ...getAudioPrefs(), speakerDeviceId: id || undefined });
+  }
+
   // When the OAuth popup finishes, it posts back and we reload the account list.
   useEffect(() => {
     function handler(ev: MessageEvent) {
       if (!ev.data || typeof ev.data !== 'object') return;
       if (ev.data.type !== 'rc_oauth_complete') return;
       if (ev.data.error) {
-        setError(`OAuth failed: ${ev.data.error}`);
+        setError(`OAuth failed: ${String(ev.data.error)}`);
         return;
       }
       void refreshAccounts();
@@ -151,22 +181,40 @@ export function SettingsPage() {
             <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-ink-500">
               Microphone
             </div>
-            <select className="input">
-              <option>System default</option>
+            <select
+              className="input"
+              value={micDeviceId}
+              onChange={(e) => handleMicChange(e.target.value)}
+            >
+              <option value="">System default</option>
+              {mics.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Microphone ${d.deviceId.slice(0, 8)}`}
+                </option>
+              ))}
             </select>
           </label>
           <label className="block">
             <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-ink-500">
               Speaker
             </div>
-            <select className="input">
-              <option>System default</option>
+            <select
+              className="input"
+              value={speakerDeviceId}
+              onChange={(e) => handleSpeakerChange(e.target.value)}
+            >
+              <option value="">System default</option>
+              {speakers.map((d) => (
+                <option key={d.deviceId} value={d.deviceId}>
+                  {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
+                </option>
+              ))}
             </select>
           </label>
         </div>
         <p className="mt-3 text-xs text-ink-500">
-          Tip: the browser will prompt for microphone permission the first time you place or
-          answer a call.
+          Device labels appear after microphone permission is granted on your first call.
+          Changes take effect when the next call connects.
         </p>
       </div>
 

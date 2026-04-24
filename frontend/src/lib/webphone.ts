@@ -15,7 +15,7 @@
 import WebPhoneSDK from '@ringcentral/web-phone';
 import type { Account, Call, PhoneNumber } from '@/types';
 import { api } from './api';
-import { generateId } from './utils';
+import { generateId, getAudioPrefs } from './utils';
 
 export interface WebPhoneEvents {
   onIncoming: (call: Call) => void;
@@ -99,6 +99,11 @@ export async function createWebPhone(
     device?: unknown;
   };
 
+  const audioPrefs = getAudioPrefs();
+  const micConstraint = audioPrefs.micDeviceId
+    ? { deviceId: { exact: audioPrefs.micDeviceId } }
+    : true;
+
   // The SDK constructor signature has varied between versions — the common
   // denominator is a single options argument that carries the provisioning data
   // and an app identifier used for registration.
@@ -109,7 +114,25 @@ export async function createWebPhone(
     appKey: undefined, // Filled server-side; keep undefined to let the SDK use its default.
     appName: 'Unified Phone Dashboard',
     appVersion: '1.0.0',
+    // Pass microphone device preference; both property names are used across SDK versions.
+    constraints: { audio: micConstraint },
+    audioConstraints: micConstraint,
   });
+
+  // Apply speaker output device if the browser supports setSinkId.
+  if (audioPrefs.speakerDeviceId && typeof AudioContext !== 'undefined') {
+    const applySpeaker = () => {
+      document.querySelectorAll('audio').forEach((el) => {
+        const elem = el as HTMLAudioElement & { setSinkId?: (id: string) => Promise<void> };
+        if (typeof elem.setSinkId === 'function' && audioPrefs.speakerDeviceId) {
+          elem.setSinkId(audioPrefs.speakerDeviceId).catch(() => undefined);
+        }
+      });
+    };
+    // Apply now and again shortly after (the SDK may create audio elements during start).
+    applySpeaker();
+    setTimeout(applySpeaker, 2000);
+  }
 
   const ready = (async () => {
     if (typeof sdk.start === 'function') await sdk.start();
@@ -134,6 +157,17 @@ export async function createWebPhone(
     if (!id) return;
     const onAccepted = () => events.onConnected(id);
     const onTerminated = () => {
+      // Remove all listeners we added to prevent memory leaks.
+      if (session.off) {
+        session.off('accepted', onAccepted);
+        session.off('answered', onAccepted);
+        session.off('established', onAccepted);
+        session.off('terminated', onTerminated);
+        session.off('bye', onTerminated);
+        session.off('disposed', onTerminated);
+        session.off('failed', onTerminated);
+        session.off('rejected', onTerminated);
+      }
       sessionsByCallId.delete(id);
       events.onEnded(id);
     };

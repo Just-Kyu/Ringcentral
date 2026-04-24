@@ -42,3 +42,22 @@ export function formatRelativeTime(iso: string): string {
 export function generateId(prefix = 'id'): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
+
+const AUDIO_PREFS_KEY = 'rc_audio_prefs';
+
+export interface AudioPrefs {
+  micDeviceId?: string;
+  speakerDeviceId?: string;
+}
+
+export function getAudioPrefs(): AudioPrefs {
+  try {
+    return JSON.parse(localStorage.getItem(AUDIO_PREFS_KEY) ?? '{}') as AudioPrefs;
+  } catch {
+    return {};
+  }
+}
+
+export function setAudioPrefs(prefs: AudioPrefs): void {
+  localStorage.setItem(AUDIO_PREFS_KEY, JSON.stringify(prefs));
+}
