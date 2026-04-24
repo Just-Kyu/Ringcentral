@@ -1,8 +1,8 @@
-# Unified Phone Dashboard
+# Easy Call — Multi-Account RingCentral Dashboard
 
-A web-based softphone that connects to **5 separate RingCentral accounts simultaneously** so
-you can receive calls on any of ~15 business numbers and place outbound calls from any of
-them — all from a single Chrome tab, with no desk phone required.
+A web-based softphone that connects to **an unlimited number of RingCentral accounts
+simultaneously** so you can receive calls on any of your business numbers and place outbound
+calls from any of them — all from a single Chrome tab, with no desk phone required.
 
 Built per [`ringcentral-multi-account-app-prompt.md`](./ringcentral-multi-account-app-prompt.md).
 
@@ -40,9 +40,9 @@ Built per [`ringcentral-multi-account-app-prompt.md`](./ringcentral-multi-accoun
    ```
    Backend is on `:3000`, frontend on `:5173`. Vite proxies `/api/*` to the backend.
 6. Sign in at http://localhost:5173 with `APP_USER_EMAIL` and the password you hashed.
-7. Click **Settings → Add account**, paste the Client ID / Secret of one of your five
-   RingCentral developer apps, and walk through the OAuth popup. Repeat for the other
-   four.
+7. Click **Settings → Add account**, paste the Client ID / Secret of one of your
+   RingCentral developer apps, and walk through the OAuth popup. Repeat for every
+   additional account you want connected — there is no limit.
 
 See [`DEPLOYMENT.md`](./DEPLOYMENT.md) for Railway deployment.
 
@@ -53,7 +53,7 @@ Browser (Chrome)                   Railway (single service)
 ┌──────────────────────┐         ┌──────────────────────────┐
 │ React + Tailwind UI  │         │ Express + Prisma         │
 │ Zustand store        │ HTTPS   │  /api/auth               │
-│ 5x WebPhone SDK      ├────────►│  /api/accounts           │
+│ N× WebPhone SDK      ├────────►│  /api/accounts           │
 │   instances          │  WSS    │  /api/oauth/callback     │
 │                      │         │  /api/numbers            │
 │                      │         │  /api/call-log           │
@@ -63,7 +63,7 @@ Browser (Chrome)                   Railway (single service)
         │                                     │
         │  RingCentral                        ▼
         │  WebRTC media   ┌──────────────────────────────────┐
-        └────────────────►│ RingCentral Cloud (5 tenants)    │
+        └────────────────►│ RingCentral Cloud (N tenants)    │
                           │  + PostgreSQL (encrypted tokens)  │
                           └──────────────────────────────────┘
 ```
@@ -108,7 +108,7 @@ Browser (Chrome)                   Railway (single service)
 
 ## RingCentral developer app setup
 
-For each of your 5 RingCentral accounts you need to create one developer app and grant
+For each of your RingCentral accounts you need to create one developer app and grant
 these scopes:
 
 - `ReadAccounts`

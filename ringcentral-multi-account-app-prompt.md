@@ -1,11 +1,11 @@
-# RingCentral Multi-Account Unified Phone Dashboard — Build Prompt
+# Easy Call — Multi-Account RingCentral Dashboard Build Prompt
 
 ## Project Overview
 
-Build a web application that connects to **5 separate RingCentral accounts simultaneously** and allows the user to:
+Build a web application that connects to **an unlimited number of RingCentral accounts simultaneously** and allows the user to:
 
-1. **Receive incoming calls** from all 5 accounts (covering ~15 phone numbers total) in one unified interface
-2. **Make outbound calls** from any of the 15 numbers by selecting which number to call from
+1. **Receive incoming calls** from every connected account (covering every number on every tenant) in one unified interface
+2. **Make outbound calls** from any connected number by selecting which number to call from
 3. **See clearly which number** is being called on incoming calls (which account + which specific number)
 4. **Handle multiple simultaneous calls** with hold, transfer, mute, and switch capabilities
 5. Run entirely in the browser using WebRTC — no phone hardware required
@@ -18,14 +18,14 @@ The app will be deployed on **Railway** and accessed via Chrome browser.
 
 ### Functional Requirements
 
-- **Multi-Account Authentication**: OAuth 2.0 flow for all 5 RingCentral accounts, with secure token storage and auto-refresh
-- **Simultaneous WebRTC Connections**: 5 independent WebPhone SDK instances running in parallel, one per account
+- **Multi-Account Authentication**: OAuth 2.0 flow for every connected RingCentral account, with secure token storage and auto-refresh
+- **Simultaneous WebRTC Connections**: One independent WebPhone SDK instance per account, scaling to as many accounts as the user adds
 - **Unified Incoming Call Notifications**: When any number on any account rings, show a clear notification with:
   - Caller's phone number and name (if available)
-  - Which of the 15 business numbers was dialed
+  - Which business number was dialed
   - Which account it belongs to
   - Answer / Decline / Send to Voicemail buttons
-- **Unified Outbound Dialer**: A single dialpad with a "From:" dropdown listing all 15 numbers, grouped by account
+- **Unified Outbound Dialer**: A single dialpad with a "From:" dropdown listing every connected number, grouped by account
 - **Active Call Management**:
   - Hold / Resume
   - Mute / Unmute
@@ -33,8 +33,8 @@ The app will be deployed on **Railway** and accessed via Chrome browser.
   - Transfer
   - Hang up
   - Switch between multiple active calls
-- **Call History**: Unified log of all inbound/outbound calls across all 5 accounts
-- **Visual Account/Number Labels**: Each of the 15 numbers should be labeled (e.g., "Main Line — Premier Trucking", "Sales — Account 2") configurable by the user
+- **Call History**: Unified log of all inbound/outbound calls across every connected account
+- **Visual Account/Number Labels**: Every number should be labeled (e.g., "Main Line — Premier Trucking", "Sales — Account 2") configurable by the user
 
 ### Non-Functional Requirements
 
@@ -86,7 +86,7 @@ The app will be deployed on **Railway** and accessed via Chrome browser.
 │  ┌────────────────────────────────────────────┐  │
 │  │  React Frontend                            │  │
 │  │  - Unified Dashboard UI                    │  │
-│  │  - 5x WebPhone SDK instances               │  │
+│  │  - N× WebPhone SDK instances               │  │
 │  │  - Zustand state store                     │  │
 │  └───────────────┬────────────────────────────┘  │
 └──────────────────┼───────────────────────────────┘
@@ -97,7 +97,7 @@ The app will be deployed on **Railway** and accessed via Chrome browser.
 │          Railway Deployment                       │
 │  ┌───────────────▼────────────────────────────┐  │
 │  │  Node.js Backend                           │  │
-│  │  - OAuth flow handler (5 accounts)         │  │
+│  │  - OAuth flow handler (unlimited accounts) │  │
 │  │  - Token refresh service                   │  │
 │  │  - SIP provisioning proxy                  │  │
 │  │  - Call history logger                     │  │
@@ -161,7 +161,7 @@ Layout (desktop):
 ### 3. Dialpad View
 
 - Large, clean dialpad with number buttons
-- **"From:" dropdown at the top** listing all 15 numbers with their labels and account
+- **"From:" dropdown at the top** listing every connected number with its label and account
   - Example entries:
     - `📞 (513) 493-0303 — Premier Trucking Main`
     - `📞 (555) 123-4567 — Premier Sales`
@@ -172,7 +172,7 @@ Layout (desktop):
 
 ### 4. Incoming Call Handling
 
-- When a call arrives on ANY of the 5 accounts:
+- When a call arrives on ANY of the connected accounts:
   - A prominent incoming call modal appears
   - Shows caller number, caller name (from contacts if available), the dialed business number, and which account
   - Plays a ringtone (different per account optional)
@@ -189,7 +189,7 @@ When on a call, show:
 
 ### 6. Call History
 
-- Unified log across all 5 accounts
+- Unified log across every connected account
 - Filterable by: account, number, direction (in/out), date range
 - Columns: Time, Direction, Caller/Callee, Business Number Used, Duration, Status
 - Click any entry to call back
@@ -247,7 +247,7 @@ const sipProvision = await sdk.platform().post(
 
 const webPhone = new WebPhone(sipProvision, {
   appKey: account.clientId,
-  appName: 'Unified Phone Dashboard',
+  appName: 'Easy Call',
   appVersion: '1.0.0',
 });
 
@@ -410,12 +410,12 @@ RingCentral Client IDs and Secrets are entered by the user via the UI and stored
 
 The app is considered complete when:
 - [ ] User can log in to the dashboard
-- [ ] User can add all 5 RingCentral accounts via OAuth
-- [ ] All 15 phone numbers are labeled and visible
-- [ ] All 5 accounts show as "Connected" simultaneously
-- [ ] An incoming call on any of the 15 numbers triggers the UI notification with correct labeling
+- [ ] User can add every RingCentral account they own via OAuth (no hard limit)
+- [ ] Every phone number is labeled and visible
+- [ ] Every added account shows as "Connected" simultaneously
+- [ ] An incoming call on any connected number triggers the UI notification with correct labeling
 - [ ] User can answer and talk through the browser with clear audio
-- [ ] User can make an outbound call from any of the 15 numbers via the "From:" dropdown
+- [ ] User can make an outbound call from any connected number via the "From:" dropdown
 - [ ] User can be on a call from Account 1 and receive a call from Account 3 simultaneously (call waiting works)
 - [ ] Call history shows entries from all accounts
 - [ ] App auto-refreshes OAuth tokens without user intervention
