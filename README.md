@@ -9,7 +9,7 @@ Built per [`ringcentral-multi-account-app-prompt.md`](./ringcentral-multi-accoun
 ## What's in the box
 
 - **Frontend** — Vite + React 18 + TypeScript + TailwindCSS + Zustand, plus a thin wrapper
-  around `@ringcentral/web-phone` for browser WebRTC.
+  around `ringcentral-web-phone` for browser WebRTC.
 - **Backend** — Node 20 + Express + TypeScript + Prisma (PostgreSQL). Owns OAuth, encrypts
   RingCentral tokens at rest with AES-256-GCM, proxies SIP provisioning so client secrets
   never reach the browser, and refreshes access tokens in the background every 5 minutes.
@@ -83,7 +83,7 @@ Browser (Chrome)                   Railway (single service)
 │   │   │   ├── dialpad/          # Keypad, FromNumberSelect
 │   │   │   └── ui/               # Button, Badge, Modal
 │   │   ├── store/useStore.ts     # Zustand store, owns calls + accounts + history
-│   │   ├── lib/webphone.ts       # @ringcentral/web-phone wrapper
+│   │   ├── lib/webphone.ts       # ringcentral-web-phone wrapper
 │   │   ├── lib/api.ts            # typed REST client
 │   │   └── types/                # shared TS types
 │   └── vite.config.ts            # proxies /api to backend in dev

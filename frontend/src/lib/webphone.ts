@@ -1,5 +1,5 @@
 /**
- * Thin wrapper around @ringcentral/web-phone.
+ * Thin wrapper around ringcentral-web-phone.
  *
  * One wrapper instance per RingCentral account.  The wrapper:
  *   1. Fetches SIP provisioning from our backend (the backend holds the
@@ -12,7 +12,7 @@
  * the SDK you install exposes slightly different shapes, adjust the narrow
  * adapter methods below (`extractRemote`, `bindSessionEvents`, `invite`).
  */
-import WebPhoneSDK from '@ringcentral/web-phone';
+import WebPhoneSDK from 'ringcentral-web-phone';
 import type { Account, Call, PhoneNumber } from '@/types';
 import { api } from './api';
 import { generateId, getAudioPrefs } from './utils';

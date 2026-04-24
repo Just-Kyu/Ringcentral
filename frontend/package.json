@@ -10,8 +10,8 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "@ringcentral/sdk": "^5.0.4",
-    "@ringcentral/web-phone": "^2.0.0",
+    "@ringcentral/sdk": "^5.0.11",
+    "ringcentral-web-phone": "^2.4.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.460.0",
     "react": "^18.3.1",
