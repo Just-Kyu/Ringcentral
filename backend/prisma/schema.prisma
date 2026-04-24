@@ -1,0 +1,65 @@
+// Prisma schema for the Unified Phone Dashboard
+// Run `npx prisma migrate dev` (local) or `npx prisma migrate deploy` (Railway)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AppUser {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+}
+
+model Account {
+  id           String        @id @default(cuid())
+  name         String
+  // OAuth credentials — secrets are AES-256-GCM encrypted at rest.
+  clientId     String
+  clientSecret String        // encrypted
+  accessToken  String?       // encrypted
+  refreshToken String?       // encrypted
+  tokenExpiry  DateTime?
+  status       String        @default("disconnected")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  phoneNumbers PhoneNumber[]
+  callLogs     CallLog[]
+}
+
+model PhoneNumber {
+  id          String   @id @default(cuid())
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  number      String
+  label       String   @default("Unlabeled")
+  extensionId String?
+  isDefault   Boolean  @default(false)
+
+  @@index([accountId])
+}
+
+model CallLog {
+  id                 String   @id @default(cuid())
+  accountId          String
+  account            Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  direction          String
+  fromNumber         String
+  toNumber           String
+  businessNumberUsed String
+  businessNumberLabel String  @default("")
+  duration           Int      @default(0)
+  status             String
+  startedAt          DateTime
+  recording          String?
+
+  @@index([accountId])
+  @@index([startedAt])
+}
