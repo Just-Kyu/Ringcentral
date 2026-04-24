@@ -217,9 +217,9 @@ export const useStore = create<State & Actions>((set, get) => ({
               set((s) => ({ incomingQueue: [...s.incomingQueue, call] })),
             onConnected: (callId) => {
               set((s) => ({
-                activeCalls: s.activeCalls.map((c) =>
+                activeCalls: s.activeCalls.map((c): Call =>
                   c.id === callId
-                    ? { ...c, status: 'active', connectedAt: Date.now() }
+                    ? { ...c, status: 'active' as const, connectedAt: Date.now() }
                     : c,
                 ),
               }));
@@ -229,7 +229,7 @@ export const useStore = create<State & Actions>((set, get) => ({
                 get().activeCalls.find((c) => c.id === callId) ??
                 get().incomingQueue.find((c) => c.id === callId);
               if (ended) {
-                const finalStatus =
+                const finalStatus: Call['status'] =
                   ended.status === 'voicemail'
                     ? 'voicemail'
                     : ended.status === 'ringing'
@@ -339,7 +339,13 @@ export const useStore = create<State & Actions>((set, get) => ({
       incomingQueue: s.incomingQueue.filter((c) => c.id !== callId),
       activeCalls: [
         ...s.activeCalls.map((c): Call =>
+<<<<<<< HEAD
           c.status === 'active' ? { ...c, onHold: true, status: 'on-hold' } : c,
+=======
+          c.status === 'active'
+            ? { ...c, onHold: true, status: 'on-hold' as const }
+            : c,
+>>>>>>> fc16def (Fix Railway build and deployment)
         ),
         { ...ringing, status: 'active' as const, connectedAt: Date.now() },
       ],
@@ -357,8 +363,8 @@ export const useStore = create<State & Actions>((set, get) => ({
     const ringing = get().incomingQueue.find((c) => c.id === callId);
     if (!ringing) return;
     set((s) => ({
-      incomingQueue: s.incomingQueue.map((c) =>
-        c.id === callId ? { ...c, status: 'voicemail' } : c,
+      incomingQueue: s.incomingQueue.map((c): Call =>
+        c.id === callId ? { ...c, status: 'voicemail' as const } : c,
       ),
     }));
     void get()._phones.get(ringing.accountId)?.decline(callId);
@@ -388,9 +394,13 @@ export const useStore = create<State & Actions>((set, get) => ({
     const next = !call.onHold;
     await get()._phones.get(call.accountId)?.hold(callId, next);
     set((s) => ({
-      activeCalls: s.activeCalls.map((c) =>
+      activeCalls: s.activeCalls.map((c): Call =>
         c.id === callId
-          ? { ...c, onHold: next, status: next ? 'on-hold' : 'active' }
+          ? {
+              ...c,
+              onHold: next,
+              status: (next ? 'on-hold' : 'active') as Call['status'],
+            }
           : c,
       ),
     }));
