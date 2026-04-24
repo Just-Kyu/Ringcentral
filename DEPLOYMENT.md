@@ -38,8 +38,10 @@ Railway should pick these up from `package.json`, but to be explicit:
 - **Build command**: `npm run build`
 - **Start command**: `npm --workspace backend run prisma:migrate && npm start`
 
-The `prisma:migrate` step runs `prisma migrate deploy`, which is safe to run on every
-boot — it only applies migrations that haven't been applied yet.
+The `prisma:migrate` step runs `prisma db push --skip-generate`, which is safe to run
+on every boot — it diffs the schema against the live database and applies any missing
+changes. We use `db push` instead of `migrate deploy` because this app doesn't keep a
+migrations history; schema changes flow straight from `schema.prisma`.
 
 ## 5. Configure RingCentral redirect URIs
 
