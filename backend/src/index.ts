@@ -71,7 +71,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: err.message });
 });
 
-app.listen(env.PORT, () => {
-  console.log(`> Unified Phone backend listening on :${env.PORT} (${env.NODE_ENV})`);
+app.listen(env.PORT, '0.0.0.0', () => {
+  console.log(`> Unified Phone backend listening on 0.0.0.0:${env.PORT} (${env.NODE_ENV})`);
   startTokenRefreshJob();
 });
