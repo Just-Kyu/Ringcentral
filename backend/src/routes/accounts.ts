@@ -49,26 +49,33 @@ router.post('/', async (req, res) => {
     return;
   }
   const { name, clientId, clientSecret } = parsed.data;
-  const account = await prisma.account.create({
-    data: {
-      name,
-      clientId,
-      clientSecret: encrypt(clientSecret),
-      status: 'connecting',
-    },
-    include: { phoneNumbers: true },
-  });
-  const oauthUrl = buildAuthorizeUrl(clientId, generateOAuthState(account.id));
-  res.status(201).json({
-    account: {
-      id: account.id,
-      name: account.name,
-      status: account.status,
-      createdAt: account.createdAt.toISOString(),
-      numbers: [],
-    },
-    oauthUrl,
-  });
+  try {
+    const account = await prisma.account.create({
+      data: {
+        name,
+        clientId,
+        clientSecret: encrypt(clientSecret),
+        status: 'connecting',
+      },
+      include: { phoneNumbers: true },
+    });
+    const oauthUrl = buildAuthorizeUrl(clientId, generateOAuthState(account.id));
+    res.status(201).json({
+      account: {
+        id: account.id,
+        name: account.name,
+        status: account.status,
+        createdAt: account.createdAt.toISOString(),
+        numbers: [],
+      },
+      oauthUrl,
+    });
+  } catch (e) {
+    console.error('POST /api/accounts failed:', e);
+    res
+      .status(500)
+      .json({ error: e instanceof Error ? e.message : 'Failed to create account' });
+  }
 });
 
 router.delete('/:id', async (req, res) => {
