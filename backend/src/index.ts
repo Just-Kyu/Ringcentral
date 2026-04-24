@@ -18,6 +18,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 
+// Running behind a single reverse proxy (Railway, Codespaces port-forwarding,
+// etc.). express-rate-limit refuses to honor X-Forwarded-For without an
+// explicit trust-proxy setting, so trust one upstream hop.
+app.set('trust proxy', 1);
+
 app.use(
   helmet({
     contentSecurityPolicy: false, // Vite/SDK inline scripts; tighten in production via custom CSP.
