@@ -8,7 +8,6 @@ import {
   PhoneForwarded,
   PhoneOff,
   Circle,
-  CircleDot,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { Keypad } from '@/components/dialpad/Keypad';
@@ -21,7 +20,6 @@ export function ActiveCallPanel() {
   const hangup = useStore((s) => s.hangup);
   const toggleMute = useStore((s) => s.toggleMute);
   const toggleHold = useStore((s) => s.toggleHold);
-  const toggleRecording = useStore((s) => s.toggleRecording);
   const sendDtmf = useStore((s) => s.sendDtmf);
   const transfer = useStore((s) => s.transfer);
 
@@ -142,10 +140,12 @@ export function ActiveCallPanel() {
               label="Transfer"
             />
             <ControlButton
-              active={focused.recording}
-              onClick={() => toggleRecording(focused.id)}
-              icon={focused.recording ? CircleDot : Circle}
-              label={focused.recording ? 'Recording' : 'Record'}
+              active={false}
+              disabled
+              onClick={() => undefined}
+              icon={Circle}
+              label="Record"
+              title="Call recording is not yet supported"
             />
             <button
               onClick={() => hangup(focused.id)}
@@ -199,20 +199,28 @@ function ControlButton({
   label,
   onClick,
   active,
+  disabled,
+  title,
 }: {
   icon: typeof Mic;
   label: string;
   onClick: () => void;
   active?: boolean;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
+      title={title}
       className={cn(
         'flex flex-col items-center justify-center gap-1 rounded-xl px-3 py-3 transition',
-        active
-          ? 'bg-brand-600 text-white hover:bg-brand-700'
-          : 'bg-ink-100 text-ink-800 hover:bg-ink-200',
+        disabled
+          ? 'cursor-not-allowed bg-ink-50 text-ink-300'
+          : active
+            ? 'bg-brand-600 text-white hover:bg-brand-700'
+            : 'bg-ink-100 text-ink-800 hover:bg-ink-200',
       )}
     >
       <Icon size={20} />

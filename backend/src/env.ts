@@ -8,7 +8,7 @@ export const env = {
   DATABASE_URL: required('DATABASE_URL', 'postgresql://localhost:5432/unified_phone_dev'),
   ENCRYPTION_KEY: required(
     'ENCRYPTION_KEY',
-    // 32-byte zero key — only acceptable for local boot before configuring.
+    // 32-byte zero key — only acceptable for local dev before configuring.
     '0000000000000000000000000000000000000000000000000000000000000000',
   ),
   JWT_SECRET: required('JWT_SECRET', 'dev-only-jwt-secret-change-me'),
@@ -20,3 +20,15 @@ export const env = {
   RINGCENTRAL_SERVER:
     process.env.RINGCENTRAL_SERVER ?? 'https://platform.ringcentral.com',
 };
+
+if (env.NODE_ENV === 'production') {
+  if (env.ENCRYPTION_KEY === '0000000000000000000000000000000000000000000000000000000000000000') {
+    throw new Error(
+      'ENCRYPTION_KEY must be set to a real random value in production. ' +
+      'Generate one with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"',
+    );
+  }
+  if (env.JWT_SECRET === 'dev-only-jwt-secret-change-me') {
+    throw new Error('JWT_SECRET must be set to a real random value in production.');
+  }
+}
