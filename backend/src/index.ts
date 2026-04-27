@@ -12,6 +12,7 @@ import accountsRoutes from './routes/accounts.js';
 import oauthRoutes from './routes/oauth.js';
 import numbersRoutes from './routes/numbers.js';
 import callLogRoutes from './routes/callLog.js';
+import recordingsRoutes from './routes/recordings.js';
 import { startTokenRefreshJob } from './jobs/tokenRefresh.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -52,6 +53,7 @@ app.use('/api/accounts', accountsRoutes);
 app.use('/api/oauth', oauthRoutes);
 app.use('/api/numbers', numbersRoutes);
 app.use('/api/call-log', callLogRoutes);
+app.use('/api/recordings', recordingsRoutes);
 
 // Production: serve the built frontend bundle.
 if (env.NODE_ENV === 'production') {

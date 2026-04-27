@@ -86,6 +86,27 @@ export const api = {
   // server-held client_secret so the secret never enters the browser)
   sipProvision: (accountId: string) =>
     request<unknown>(`/accounts/${accountId}/sip-provision`, { method: 'POST' }),
+
+  // Recordings — backend streams audio through a proxy so the user never
+  // handles a RingCentral access token.
+  listRecordings: () => request<RecordingItem[]>('/recordings'),
+  recordingAudioUrl: (accountId: string, recordingId: string) =>
+    `${BASE_URL}/recordings/${accountId}/${recordingId}/audio`,
 };
+
+export interface RecordingItem {
+  callLogId: string;
+  recordingId: string;
+  accountId: string;
+  accountName: string;
+  startedAt: string;
+  durationSec: number;
+  direction: 'inbound' | 'outbound';
+  fromNumber: string;
+  toNumber: string;
+  fromName?: string;
+  toName?: string;
+  result: string;
+}
 
 export { ApiError };

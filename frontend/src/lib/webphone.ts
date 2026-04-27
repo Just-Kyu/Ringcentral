@@ -1,21 +1,7 @@
-/**
- * Thin wrapper around ringcentral-web-phone.
- *
- * One wrapper instance per RingCentral account.  The wrapper:
- *   1. Fetches SIP provisioning from our backend (the backend holds the
- *      client_secret, so it never reaches the browser).
- *   2. Starts the SDK which opens a SIP-over-WSS connection to RingCentral.
- *   3. Surfaces inbound/outbound call events to the Zustand store via
- *      the `WebPhoneEvents` callbacks.
- *
- * The SDK's exact event/method names have shifted between major versions.  If
- * the SDK you install exposes slightly different shapes, adjust the narrow
- * adapter methods below (`extractRemote`, `bindSessionEvents`, `invite`).
- */
 import WebPhoneSDK from 'ringcentral-web-phone';
 import type { Account, Call, PhoneNumber } from '@/types';
 import { api } from './api';
-import { generateId, getAudioPrefs } from './utils';
+import { generateId, getAudioPrefs, getAccountInboundEnabled } from './utils';
 
 export interface WebPhoneEvents {
   onIncoming: (call: Call) => void;
@@ -38,19 +24,20 @@ export interface WebPhoneInstance {
   destroy: () => void;
 }
 
-// Minimal SIP session shape we rely on. Different SDK versions name these
-// slightly differently — adjust the accessor functions below if needed.
 interface SipSession {
   id?: string;
   remoteNumber?: string;
   remoteName?: string;
   to?: string;
   from?: string;
-  answer: () => Promise<void> | void;
-  reject?: () => Promise<void> | void;
+  request?: { from?: { uri?: { toString?: () => string } }; to?: { uri?: { toString?: () => string } } };
+  accept?: (opts?: unknown) => Promise<void> | void;
+  answer?: (opts?: unknown) => Promise<void> | void;
+  reject?: (opts?: unknown) => Promise<void> | void;
   decline?: () => Promise<void> | void;
-  hangup: () => Promise<void> | void;
-  terminate?: () => Promise<void> | void;
+  hangup?: () => Promise<void> | void;
+  terminate?: (opts?: unknown) => Promise<void> | void;
+  bye?: () => Promise<void> | void;
   hold: () => Promise<void> | void;
   unhold?: () => Promise<void> | void;
   mute: () => Promise<void> | void;
@@ -62,28 +49,80 @@ interface SipSession {
   off?: (event: string, listener: (...args: unknown[]) => void) => void;
 }
 
+interface UserAgent {
+  on: (event: string, listener: (session: SipSession) => void) => void;
+  off?: (event: string, listener: (session: SipSession) => void) => void;
+  invite?: (target: string, options?: unknown) => Promise<SipSession> | SipSession;
+  call?: (target: string, options?: unknown) => Promise<SipSession> | SipSession;
+  register?: () => Promise<void>;
+  start?: () => Promise<void>;
+}
+
 interface SipSdk {
+  userAgent?: UserAgent;
   start?: () => Promise<void>;
   register?: () => Promise<void>;
-  on: (event: string, listener: (session: SipSession) => void) => void;
-  call: (to: string, from?: string) => Promise<SipSession> | SipSession;
+  on?: (event: string, listener: (session: SipSession) => void) => void;
+  call?: (to: string, from?: string) => Promise<SipSession> | SipSession;
+  invite?: (target: string, options?: unknown) => Promise<SipSession> | SipSession;
   dispose?: () => Promise<void> | void;
   destroy?: () => void;
 }
 
+function parseUri(uri: string | undefined): string | undefined {
+  if (!uri) return undefined;
+  const m = uri.match(/(?:^|<)(?:sip:)?(\+?\d+)@/);
+  return m ? m[1] : undefined;
+}
+
+function readUri(holder: unknown): string | undefined {
+  if (!holder) return undefined;
+  const obj = holder as { toString?: () => string; uri?: { toString?: () => string } };
+  if (typeof obj.toString === 'function') {
+    const s = obj.toString();
+    if (typeof s === 'string' && s.length && s !== '[object Object]') return s;
+  }
+  if (obj.uri && typeof obj.uri.toString === 'function') return obj.uri.toString();
+  return undefined;
+}
+
 function extractRemoteNumber(session: SipSession): string {
-  return session.remoteNumber ?? parseUri(session.from) ?? '';
+  if (session.remoteNumber) return session.remoteNumber;
+  const fromStr = readUri(session.from) ?? readUri(session.request?.from);
+  return parseUri(fromStr) ?? '';
 }
 
 function extractLocalNumber(session: SipSession): string {
-  return parseUri(session.to) ?? '';
+  const toStr = readUri(session.to) ?? readUri(session.request?.to);
+  return parseUri(toStr) ?? '';
 }
 
-function parseUri(uri: string | undefined): string | undefined {
-  if (!uri) return undefined;
-  // "sip:+15551234567@domain" → "+15551234567"
-  const m = uri.match(/(?:^|<)(?:sip:)?(\+?\d+)@/);
-  return m ? m[1] : undefined;
+/**
+ * Resolve the entry point that places outbound calls. Different versions of
+ * `ringcentral-web-phone` expose this in different places — v2.x puts it on
+ * `sdk.userAgent.invite()`, while older v1.x puts it directly on the SDK.
+ */
+function resolveInvite(sdk: SipSdk): ((target: string, opts?: unknown) => Promise<SipSession> | SipSession) | null {
+  if (sdk.userAgent?.invite) return sdk.userAgent.invite.bind(sdk.userAgent);
+  if (sdk.userAgent?.call) return sdk.userAgent.call.bind(sdk.userAgent);
+  if (sdk.invite) return sdk.invite.bind(sdk);
+  if (sdk.call) return sdk.call.bind(sdk);
+  return null;
+}
+
+/**
+ * Subscribe a single listener to whichever of the SDK's two event APIs is
+ * present (`sdk.on` in v1, `sdk.userAgent.on` in v2). Returns the events that
+ * were actually wired up so the caller can decide what to teardown.
+ */
+function bindIncoming(sdk: SipSdk, listener: (session: SipSession) => void) {
+  const events = ['invite', 'inviteReceived', 'inboundCall'];
+  if (sdk.userAgent?.on) {
+    for (const ev of events) sdk.userAgent.on(ev, listener);
+  }
+  if (sdk.on) {
+    for (const ev of events) sdk.on(ev, listener);
+  }
 }
 
 export async function createWebPhone(
@@ -104,22 +143,17 @@ export async function createWebPhone(
     ? { deviceId: { exact: audioPrefs.micDeviceId } }
     : true;
 
-  // The SDK constructor signature has varied between versions — the common
-  // denominator is a single options argument that carries the provisioning data
-  // and an app identifier used for registration.
   const sdk = new (WebPhoneSDK as unknown as new (opts: unknown) => SipSdk)({
     sipInfo: Array.isArray((sipProvision as { sipInfo?: unknown[] }).sipInfo)
       ? (sipProvision as { sipInfo: unknown[] }).sipInfo[0]
       : (sipProvision as { sipInfo?: unknown }).sipInfo,
-    appKey: undefined, // Filled server-side; keep undefined to let the SDK use its default.
+    appKey: undefined,
     appName: 'Easy Call',
     appVersion: '1.0.0',
-    // Pass microphone device preference; both property names are used across SDK versions.
     constraints: { audio: micConstraint },
     audioConstraints: micConstraint,
   });
 
-  // Apply speaker output device if the browser supports setSinkId.
   if (audioPrefs.speakerDeviceId && typeof AudioContext !== 'undefined') {
     const applySpeaker = () => {
       document.querySelectorAll('audio').forEach((el) => {
@@ -129,14 +163,22 @@ export async function createWebPhone(
         }
       });
     };
-    // Apply now and again shortly after (the SDK may create audio elements during start).
     applySpeaker();
     setTimeout(applySpeaker, 2000);
   }
 
+  // Start / register the SIP stack.
   const ready = (async () => {
-    if (typeof sdk.start === 'function') await sdk.start();
-    else if (typeof sdk.register === 'function') await sdk.register();
+    try {
+      const ua = sdk.userAgent;
+      if (ua?.start) await ua.start();
+      else if (ua?.register) await ua.register();
+      else if (sdk.start) await sdk.start();
+      else if (sdk.register) await sdk.register();
+    } catch (e) {
+      events.onError(account.id, e instanceof Error ? e.message : 'WebPhone start failed');
+      throw e;
+    }
   })();
 
   function labelForNumber(bizNumber: string): PhoneNumber | undefined {
@@ -157,7 +199,6 @@ export async function createWebPhone(
     if (!id) return;
     const onAccepted = () => events.onConnected(id);
     const onTerminated = () => {
-      // Remove all listeners we added to prevent memory leaks.
       if (session.off) {
         session.off('accepted', onAccepted);
         session.off('answered', onAccepted);
@@ -171,7 +212,6 @@ export async function createWebPhone(
       sessionsByCallId.delete(id);
       events.onEnded(id);
     };
-    // Different SDK versions emit different events — bind all plausible names.
     session.on('accepted', onAccepted);
     session.on('answered', onAccepted);
     session.on('established', onAccepted);
@@ -182,8 +222,26 @@ export async function createWebPhone(
     session.on('rejected', onTerminated);
   }
 
-  // Incoming invitations from RingCentral land here.
-  const bindIncoming = (session: SipSession) => {
+  // Inbound is OPT-IN per account. When disabled, the SIP stack still
+  // registers (so the SDK can place outbound calls), but we silently ignore
+  // any incoming INVITEs by immediately rejecting them — letting RingCentral's
+  // normal call routing fall through to the user's other registered devices.
+  // This mirrors the previous behavior where calls only rang in the official
+  // RingCentral app.
+  const inboundEnabled = getAccountInboundEnabled(account.id);
+
+  const onIncoming = (session: SipSession) => {
+    if (!inboundEnabled) {
+      // Reject quickly with 480 Temporarily Unavailable equivalent so the
+      // shared extension can fork to other devices without delay.
+      const reject = session.reject ?? session.decline ?? session.hangup ?? session.terminate;
+      try {
+        if (reject) Promise.resolve(reject.call(session)).catch(() => undefined);
+      } catch {
+        /* ignore */
+      }
+      return;
+    }
     const bizNumber = extractLocalNumber(session);
     const matched = labelForNumber(bizNumber) ?? account.numbers[0];
     const call = trackSession(session, {
@@ -203,9 +261,7 @@ export async function createWebPhone(
     events.onIncoming(call);
   };
 
-  sdk.on('invite', bindIncoming);
-  sdk.on('inviteReceived', bindIncoming);
-  sdk.on('inboundCall', bindIncoming);
+  bindIncoming(sdk, onIncoming);
 
   return {
     accountId: account.id,
@@ -213,7 +269,25 @@ export async function createWebPhone(
 
     async startOutbound(from, toNumber) {
       await ready;
-      const session = await Promise.resolve(sdk.call(toNumber, from.number));
+      const invite = resolveInvite(sdk);
+      if (!invite) {
+        const msg =
+          'Outbound calling unavailable: WebPhone SDK did not expose an invite() method.';
+        events.onError(account.id, msg);
+        throw new Error(msg);
+      }
+      let session: SipSession;
+      try {
+        session = await Promise.resolve(invite(toNumber, { fromNumber: from.number }));
+      } catch (e) {
+        events.onError(account.id, e instanceof Error ? e.message : 'Outbound invite failed');
+        throw e;
+      }
+      if (!session) {
+        const msg = 'Outbound invite returned no session.';
+        events.onError(account.id, msg);
+        throw new Error(msg);
+      }
       return trackSession(session, {
         accountId: account.id,
         accountName: account.name,
@@ -231,19 +305,31 @@ export async function createWebPhone(
 
     async answer(callId) {
       const s = sessionsByCallId.get(callId);
-      if (s) await Promise.resolve(s.answer());
+      if (!s) return;
+      const fn = s.accept ?? s.answer;
+      if (!fn) return;
+      try {
+        await Promise.resolve(fn.call(s));
+      } catch (e) {
+        events.onError(account.id, e instanceof Error ? e.message : 'Answer failed');
+        // If accept fails, hang up so the call doesn't stay in a stuck state.
+        const reject = s.reject ?? s.decline ?? s.hangup ?? s.terminate;
+        if (reject) await Promise.resolve(reject.call(s)).catch(() => undefined);
+      }
     },
 
     async decline(callId) {
       const s = sessionsByCallId.get(callId);
       if (!s) return;
-      await Promise.resolve((s.decline ?? s.reject ?? s.hangup).call(s));
+      const fn = s.reject ?? s.decline ?? s.hangup ?? s.terminate;
+      if (fn) await Promise.resolve(fn.call(s));
     },
 
     async hangup(callId) {
       const s = sessionsByCallId.get(callId);
       if (!s) return;
-      await Promise.resolve((s.hangup ?? s.terminate)!.call(s));
+      const fn = s.hangup ?? s.terminate ?? s.bye;
+      if (fn) await Promise.resolve(fn.call(s));
     },
 
     async hold(callId, on) {

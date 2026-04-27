@@ -4,9 +4,10 @@ import type { ViewId } from '@/store/useStore';
 
 const PAGE_TITLES: Record<ViewId, [string, string]> = {
   dialpad: ['Phone', 'Place a call from any of your business numbers'],
-  history: ['Call history', 'Recordings, transcripts, and summaries'],
+  history: ['Call history', 'Inbound and outbound calls across every account'],
+  recordings: ['Recordings', 'Saved audio of recorded calls — listen, share, download'],
   voicemail: ['Voicemail', 'Visual voicemail with transcription'],
-  messages: ['Messages', 'SMS to customers and team chat in one inbox'],
+  messages: ['Messages', 'SMS to customers in one inbox'],
   contacts: ['Contacts', 'People, drivers, brokers, and vendors'],
   numbers: ['Numbers', 'Manage every number across every account'],
   analytics: ['Analytics', 'Volume, talk time, and reach across accounts'],

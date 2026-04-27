@@ -61,3 +61,26 @@ export function getAudioPrefs(): AudioPrefs {
 export function setAudioPrefs(prefs: AudioPrefs): void {
   localStorage.setItem(AUDIO_PREFS_KEY, JSON.stringify(prefs));
 }
+
+const INBOUND_KEY = 'rc_account_inbound';
+
+/** Per-account opt-in flag for receiving inbound calls in Easy Call. */
+export function getAccountInboundEnabled(accountId: string): boolean {
+  try {
+    const map = JSON.parse(localStorage.getItem(INBOUND_KEY) ?? '{}') as Record<string, boolean>;
+    return Boolean(map[accountId]);
+  } catch {
+    return false;
+  }
+}
+
+export function setAccountInboundEnabled(accountId: string, enabled: boolean): void {
+  try {
+    const map = JSON.parse(localStorage.getItem(INBOUND_KEY) ?? '{}') as Record<string, boolean>;
+    if (enabled) map[accountId] = true;
+    else delete map[accountId];
+    localStorage.setItem(INBOUND_KEY, JSON.stringify(map));
+  } catch {
+    /* ignore */
+  }
+}

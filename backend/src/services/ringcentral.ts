@@ -8,6 +8,11 @@ const SCOPES = [
   'CallControl',
   'VoipCalling',
   'ReadPresence',
+  // Added for the voicemail and messaging features. Existing OAuth tokens
+  // do not include these — users need to disconnect and re-add each
+  // Easy Call account once for the new scopes to take effect.
+  'ReadMessages',
+  'SMS',
 ];
 
 const REDIRECT_URI = `${env.APP_BASE_URL}/api/oauth/callback`;
@@ -174,6 +179,101 @@ export async function syncPhoneNumbers(accountId: string): Promise<void> {
       })),
     }),
   ]);
+}
+
+// ============================================================================
+// Call log + recordings
+// ============================================================================
+
+interface RcCallLogRecord {
+  id: string;
+  startTime: string;
+  duration?: number;
+  direction: 'Inbound' | 'Outbound';
+  from?: { phoneNumber?: string; name?: string };
+  to?: { phoneNumber?: string; name?: string };
+  result?: string;
+  recording?: { id: string; contentUri?: string; type?: string };
+}
+
+export interface RecordingItem {
+  callLogId: string;
+  recordingId: string;
+  accountId: string;
+  accountName: string;
+  startedAt: string;
+  durationSec: number;
+  direction: 'inbound' | 'outbound';
+  fromNumber: string;
+  toNumber: string;
+  fromName?: string;
+  toName?: string;
+  result: string;
+}
+
+/**
+ * Lists recordings across the user's connected RingCentral accounts.
+ * Each call to this function hits the RingCentral call-log endpoint per
+ * account, filters down to records that include a recording, and returns
+ * them sorted newest-first.
+ */
+export async function listRecordingsForUser(userId: string): Promise<RecordingItem[]> {
+  const accounts = await prisma.account.findMany({
+    where: { appUserId: userId, status: 'connected' },
+    select: { id: true, name: true },
+  });
+  const all: RecordingItem[] = [];
+  await Promise.all(
+    accounts.map(async ({ id, name }) => {
+      try {
+        const data = await rcGet<{ records: RcCallLogRecord[] }>(
+          id,
+          '/restapi/v1.0/account/~/extension/~/call-log?perPage=100&recordingType=All&showBlocked=true&view=Detailed',
+        );
+        for (const r of data.records) {
+          if (!r.recording?.id) continue;
+          all.push({
+            callLogId: r.id,
+            recordingId: r.recording.id,
+            accountId: id,
+            accountName: name,
+            startedAt: r.startTime,
+            durationSec: r.duration ?? 0,
+            direction: r.direction === 'Inbound' ? 'inbound' : 'outbound',
+            fromNumber: r.from?.phoneNumber ?? 'unknown',
+            toNumber: r.to?.phoneNumber ?? 'unknown',
+            fromName: r.from?.name,
+            toName: r.to?.name,
+            result: r.result ?? '',
+          });
+        }
+      } catch (e) {
+        console.warn(`[recordings] account ${id} fetch failed:`, e);
+      }
+    }),
+  );
+  return all.sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+}
+
+/**
+ * Streams a recording's audio bytes from RingCentral. The browser hits our
+ * proxy endpoint instead of RingCentral directly, because the recording
+ * URL requires the account's bearer token, which is server-only.
+ */
+export async function fetchRecordingStream(
+  accountId: string,
+  recordingId: string,
+): Promise<{ status: number; contentType: string; body: ReadableStream<Uint8Array> | null }> {
+  const token = await getValidAccessToken(accountId);
+  const res = await fetch(
+    `${env.RINGCENTRAL_SERVER}/restapi/v1.0/account/~/recording/${encodeURIComponent(recordingId)}/content`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  return {
+    status: res.status,
+    contentType: res.headers.get('content-type') ?? 'audio/mpeg',
+    body: res.body,
+  };
 }
 
 /**

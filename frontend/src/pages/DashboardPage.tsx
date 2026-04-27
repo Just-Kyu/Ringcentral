@@ -7,6 +7,7 @@ import { DialpadPage } from './DialpadPage';
 import { HistoryPage } from './HistoryPage';
 import { NumbersPage } from './NumbersPage';
 import { SettingsPage } from './SettingsPage';
+import { RecordingsPage } from './RecordingsPage';
 import { ComingSoonPage } from './ComingSoonPage';
 
 export function DashboardPage() {
@@ -26,7 +27,8 @@ export function DashboardPage() {
             </div>
           )}
           {view === 'dialpad' && <DialpadPage />}
-          {view !== 'dialpad' && view !== 'voicemail' && view !== 'messages' && view !== 'contacts' && view !== 'analytics' && (
+          {view === 'recordings' && <RecordingsPage />}
+          {(view === 'history' || view === 'numbers' || view === 'settings') && (
             <div style={{ padding: 24 }}>
               <div style={{ margin: '0 auto', maxWidth: 1100 }}>
                 {view === 'history' && <HistoryPage />}

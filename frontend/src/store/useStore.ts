@@ -13,6 +13,7 @@ import { generateId } from '@/lib/utils';
 type SidebarView =
   | 'dialpad'
   | 'history'
+  | 'recordings'
   | 'voicemail'
   | 'messages'
   | 'contacts'
@@ -42,6 +43,7 @@ interface State {
   defaultFromNumberId: string | null;
   railCollapsed: boolean;
   accountFilter: string; // 'all' or an account id
+  webphoneError: string | null;
 
   // Internal: one webphone per account
   _phones: Map<string, WebPhoneInstance>;
@@ -64,6 +66,7 @@ interface Actions {
   setView: (view: SidebarView) => void;
   setRailCollapsed: (collapsed: boolean) => void;
   setAccountFilter: (filter: string) => void;
+  setWebphoneError: (msg: string | null) => void;
 
   // Outbound
   placeCall: (fromNumberId: string, toNumber: string) => Promise<void>;
@@ -141,6 +144,7 @@ export const useStore = create<State & Actions>((set, get) => ({
   defaultFromNumberId: null,
   railCollapsed: false,
   accountFilter: 'all',
+  webphoneError: null,
   _phones: new Map(),
   _tickHandle: null,
 
@@ -268,6 +272,7 @@ export const useStore = create<State & Actions>((set, get) => ({
             },
             onError: (accountId, message) => {
               console.error(`[webphone:${accountId}]`, message);
+              set({ webphoneError: `${message} (account: ${accountId})` });
             },
           });
           phones.set(account.id, phone);
@@ -327,6 +332,7 @@ export const useStore = create<State & Actions>((set, get) => ({
   setView: (view) => set({ view }),
   setRailCollapsed: (collapsed) => set({ railCollapsed: collapsed }),
   setAccountFilter: (filter) => set({ accountFilter: filter }),
+  setWebphoneError: (msg) => set({ webphoneError: msg }),
 
   placeCall: async (fromNumberId, toNumber) => {
     const found = findNumber(get().accounts, fromNumberId);

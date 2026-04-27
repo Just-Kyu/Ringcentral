@@ -50,6 +50,8 @@ export function DialpadPage() {
   const defaultId = useStore((s) => s.defaultFromNumberId);
   const placeCall = useStore((s) => s.placeCall);
   const history = useStore((s) => s.callHistory);
+  const webphoneError = useStore((s) => s.webphoneError);
+  const clearWebphoneError = useStore((s) => s.setWebphoneError);
 
   const [tab, setTab] = useState<Tab>('keypad');
   const [fromId, setFromId] = useState<string | null>(defaultId);
@@ -276,7 +278,7 @@ export function DialpadPage() {
               ))}
             </div>
 
-            {error && (
+            {(error || webphoneError) && (
               <div
                 style={{
                   borderRadius: 8,
@@ -286,9 +288,29 @@ export function DialpadPage() {
                   padding: '8px 12px',
                   fontSize: 12.5,
                   marginBottom: 12,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: 8,
                 }}
               >
-                {error}
+                <span>{error || webphoneError}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    clearWebphoneError(null);
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    fontWeight: 600,
+                  }}
+                  aria-label="Dismiss"
+                >
+                  ×
+                </button>
               </div>
             )}
 

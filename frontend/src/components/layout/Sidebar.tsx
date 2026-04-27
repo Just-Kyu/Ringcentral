@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDot,
+  Mic,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import type { ViewId } from '@/store/useStore';
@@ -30,6 +31,7 @@ const NAV_GROUPS: RailGroup[] = [
     items: [
       { id: 'dialpad', name: 'Phone', Icon: Phone },
       { id: 'history', name: 'Call history', Icon: Clock },
+      { id: 'recordings', name: 'Recordings', Icon: Mic },
       { id: 'voicemail', name: 'Voicemail', Icon: Voicemail },
       { id: 'messages', name: 'Messages', Icon: MessageSquare },
       { id: 'contacts', name: 'Contacts', Icon: Users },

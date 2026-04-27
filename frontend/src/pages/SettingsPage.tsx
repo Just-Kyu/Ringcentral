@@ -4,7 +4,12 @@ import { useStore } from '@/store/useStore';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { api } from '@/lib/api';
-import { getAudioPrefs, setAudioPrefs } from '@/lib/utils';
+import {
+  getAudioPrefs,
+  setAudioPrefs,
+  getAccountInboundEnabled,
+  setAccountInboundEnabled,
+} from '@/lib/utils';
 
 export function SettingsPage() {
   const accounts = useStore((s) => s.accounts);
@@ -127,13 +132,31 @@ export function SettingsPage() {
             </li>
           )}
           {accounts.map((a) => (
-            <li key={a.id} className="flex items-center justify-between px-5 py-4">
+            <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
               <div>
                 <div className="font-medium text-ink-900">{a.name}</div>
                 <div className="text-xs text-ink-500">
                   {a.numbers.length} numbers · added{' '}
                   {new Date(a.createdAt).toLocaleDateString()}
                 </div>
+                <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs text-ink-700">
+                  <input
+                    type="checkbox"
+                    defaultChecked={getAccountInboundEnabled(a.id)}
+                    onChange={(e) => {
+                      setAccountInboundEnabled(a.id, e.target.checked);
+                      window.alert(
+                        'Saved. Refresh the page for the change to take effect on this device.',
+                      );
+                    }}
+                  />
+                  <span>
+                    Receive inbound calls in Easy Call for this account
+                    <span className="ml-1 text-ink-400">
+                      (off keeps calls flowing to your existing RingCentral apps)
+                    </span>
+                  </span>
+                </label>
               </div>
               <div className="flex items-center gap-2">
                 <Badge
