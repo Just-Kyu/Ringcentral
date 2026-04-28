@@ -18,7 +18,7 @@ router.get('/', async (req, res) => {
   const userId = req.session!.userId;
   const accounts = await prisma.account.findMany({
     where: { appUserId: userId },
-    include: { phoneNumbers: true },
+    include: { phoneNumbers: { where: { hidden: false } } },
     orderBy: { createdAt: 'asc' },
   });
   res.json(
@@ -60,7 +60,7 @@ router.post('/', async (req, res) => {
         status: 'connecting',
         appUserId: req.session!.userId,
       },
-      include: { phoneNumbers: true },
+      include: { phoneNumbers: { where: { hidden: false } } },
     });
     const oauthUrl = buildAuthorizeUrl(clientId, generateOAuthState(account.id));
     res.status(201).json({
@@ -114,7 +114,7 @@ router.post('/:id/refresh', async (req, res) => {
     await syncPhoneNumbers(req.params.id);
     const refreshed = await prisma.account.findUnique({
       where: { id: req.params.id },
-      include: { phoneNumbers: true },
+      include: { phoneNumbers: { where: { hidden: false } } },
     });
     res.json(refreshed);
   } catch (e) {

@@ -66,4 +66,22 @@ router.post('/:id/default', async (req, res) => {
   }
 });
 
+router.delete('/:id', async (req, res) => {
+  const phoneNumber = await prisma.phoneNumber.findUnique({
+    where: { id: req.params.id },
+  });
+
+  if (!phoneNumber) {
+    res.status(404).json({ error: 'Phone number not found' });
+    return;
+  }
+
+  await prisma.phoneNumber.update({
+    where: { id: req.params.id },
+    data: { hidden: true, isDefault: false },
+  });
+
+  res.status(204).end();
+});
+
 export default router;

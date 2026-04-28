@@ -52,6 +52,7 @@ model PhoneNumber {
   label       String   @default("Unlabeled")
   extensionId String?
   isDefault   Boolean  @default(false)
+  hidden      Boolean  @default(false)
 
   @@index([accountId])
 }

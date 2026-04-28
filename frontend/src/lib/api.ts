@@ -65,6 +65,8 @@ export const api = {
     }),
   setDefaultNumber: (numberId: string) =>
     request<void>(`/numbers/${numberId}/default`, { method: 'POST' }),
+  removeNumber: (numberId: string) =>
+    request<void>(`/numbers/${numberId}`, { method: 'DELETE' }),
 
   // Call log
   listCallLog: (params: {

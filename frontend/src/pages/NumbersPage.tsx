@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Star, Edit3, Check, X } from 'lucide-react';
+import { Star, Edit3, Check, X, Trash2 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
 import { Badge } from '@/components/ui/Badge';
 import { formatPhoneNumber, cn } from '@/lib/utils';
@@ -8,6 +8,7 @@ export function NumbersPage() {
   const accounts = useStore((s) => s.accounts);
   const setNumberLabel = useStore((s) => s.setNumberLabel);
   const setDefault = useStore((s) => s.setDefaultNumber);
+  const removeNumber = useStore((s) => s.removeNumber);
 
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
@@ -105,6 +106,17 @@ export function NumbersPage() {
                       >
                         <Star size={14} fill={n.isDefault ? 'currentColor' : 'none'} />
                         {n.isDefault ? 'Default' : 'Set default'}
+                      </button>
+                      <button
+                        className="btn-ghost text-xs text-red-600 hover:text-red-700"
+                        onClick={() => {
+                          if (window.confirm(`Remove ${formatPhoneNumber(n.number)} from Easy Call?`)) {
+                            void removeNumber(n.id);
+                          }
+                        }}
+                        title="Remove from Easy Call"
+                      >
+                        <Trash2 size={14} /> Remove
                       </button>
                     </>
                   )}

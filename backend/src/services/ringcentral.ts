@@ -169,6 +169,7 @@ export async function syncPhoneNumbers(accountId: string): Promise<void> {
   // Replace existing numbers with the latest snapshot, preserving labels by phone string.
   const existing = await prisma.phoneNumber.findMany({ where: { accountId } });
   const labelByNumber = new Map(existing.map((p) => [p.number, p.label]));
+  const hiddenByNumber = new Map(existing.map((p) => [p.number, p.hidden]));
   await prisma.$transaction([
     prisma.phoneNumber.deleteMany({ where: { accountId } }),
     prisma.phoneNumber.createMany({
@@ -176,6 +177,7 @@ export async function syncPhoneNumbers(accountId: string): Promise<void> {
         accountId,
         number: n.phoneNumber,
         label: labelByNumber.get(n.phoneNumber) ?? 'Unlabeled',
+        hidden: hiddenByNumber.get(n.phoneNumber) ?? false,
       })),
     }),
   ]);

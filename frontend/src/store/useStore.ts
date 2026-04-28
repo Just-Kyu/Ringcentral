@@ -62,6 +62,7 @@ interface Actions {
 
   setNumberLabel: (numberId: string, label: string) => Promise<void>;
   setDefaultNumber: (numberId: string) => Promise<void>;
+  removeNumber: (numberId: string) => Promise<void>;
 
   setView: (view: SidebarView) => void;
   setRailCollapsed: (collapsed: boolean) => void;
@@ -328,6 +329,24 @@ export const useStore = create<State & Actions>((set, get) => ({
         numbers: a.numbers.map((n) => ({ ...n, isDefault: n.id === numberId })),
       })),
     }));
+  },
+
+  removeNumber: async (numberId) => {
+    await api.removeNumber(numberId);
+    set((s) => {
+      const accounts = s.accounts.map((a) => ({
+        ...a,
+        numbers: a.numbers.filter((n) => n.id !== numberId),
+      }));
+      const allNumbers = accounts.flatMap((a) => a.numbers);
+      return {
+        accounts,
+        defaultFromNumberId:
+          s.defaultFromNumberId === numberId
+            ? allNumbers.find((n) => n.isDefault)?.id ?? allNumbers[0]?.id ?? null
+            : s.defaultFromNumberId,
+      };
+    });
   },
 
   setView: (view) => set({ view }),
