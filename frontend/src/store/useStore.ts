@@ -75,6 +75,7 @@ interface Actions {
   answer: (callId: string) => Promise<void>;
   decline: (callId: string) => Promise<void>;
   sendToVoicemail: (callId: string) => void;
+  ignoreIncoming: (callId: string) => void;
   hangup: (callId: string) => Promise<void>;
   toggleMute: (callId: string) => Promise<void>;
   toggleHold: (callId: string) => Promise<void>;
