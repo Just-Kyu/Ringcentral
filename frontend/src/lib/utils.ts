@@ -84,3 +84,66 @@ export function setAccountInboundEnabled(accountId: string, enabled: boolean): v
     /* ignore */
   }
 }
+
+/**
+ * Normalize any user-entered phone number into E.164 form for dialing.
+ * Accepts shapes like "(513) 902-7643", "513-902-7643", "5139027643",
+ * "+1 513 902 7643", "1-513-902-7643", "+15139027643", etc.
+ *
+ * Rules:
+ *  - If it already starts with `+`, keep the literal `+` and digits.
+ *  - 10 digits → assume US/Canada, prepend `+1`.
+ *  - 11 digits starting with `1` → prepend `+`.
+ *  - 7 digits → reject (need an area code).
+ *  - Anything else (8-15 digits, non-NANP) → prepend `+` as-is.
+ * Returns null if the number can't be coerced into a dialable form.
+ */
+export function normalizeDialString(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const startedWithPlus = trimmed.startsWith('+');
+  const digits = trimmed.replace(/\D/g, '');
+  if (digits.length === 0) return null;
+  if (startedWithPlus) {
+    return `+${digits}`;
+  }
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  if (digits.length < 8) return null;
+  return `+${digits}`;
+}
+
+/**
+ * Trigger the browser's microphone permission prompt and return true if
+ * the user grants (or has already granted) access.  Throws a friendly
+ * error if it's blocked at the browser or system level.
+ */
+export async function ensureMicrophonePermission(): Promise<void> {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error(
+      'Your browser does not support WebRTC microphone access. Use a recent Chrome or Edge.',
+    );
+  }
+  const prefs = getAudioPrefs();
+  const constraint = prefs.micDeviceId
+    ? { deviceId: { exact: prefs.micDeviceId } }
+    : true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: constraint });
+    // Release the test stream — the WebPhone will request its own.
+    stream.getTracks().forEach((t) => t.stop());
+  } catch (e) {
+    const err = e as DOMException & { name?: string; message?: string };
+    if (err.name === 'NotAllowedError' || err.name === 'SecurityError') {
+      throw new Error(
+        'Microphone access is blocked. Click the lock icon in the address bar, set Microphone to Allow, then try again.',
+      );
+    }
+    if (err.name === 'NotFoundError' || err.name === 'OverconstrainedError') {
+      throw new Error(
+        'No microphone found. Plug in a mic (or check your selected mic in Settings) and try again.',
+      );
+    }
+    throw new Error(`Microphone error: ${err.message ?? err.name ?? 'unknown'}`);
+  }
+}

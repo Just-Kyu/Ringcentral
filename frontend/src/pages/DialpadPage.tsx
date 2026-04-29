@@ -12,7 +12,7 @@ import {
   UserPlus,
 } from 'lucide-react';
 import { useStore } from '@/store/useStore';
-import { formatPhoneNumber, formatRelativeTime } from '@/lib/utils';
+import { formatPhoneNumber, formatRelativeTime, normalizeDialString } from '@/lib/utils';
 
 /**
  * Caller ID pill renders the local 10-digit form `(NNN) NNN-NNNN`
@@ -77,13 +77,13 @@ export function DialpadPage() {
       setError('Choose a "From:" number first.');
       return;
     }
-    const digits = dest.replace(/\D/g, '');
-    if (digits.length < 7) {
+    const target = normalizeDialString(dest);
+    if (!target) {
       setError('Please enter a valid phone number.');
       return;
     }
     try {
-      await placeCall(selectedFromId, dest.startsWith('+') ? dest : `+${digits}`);
+      await placeCall(selectedFromId, target);
       setDest('');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start call');
