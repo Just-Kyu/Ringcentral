@@ -261,19 +261,36 @@ export async function listRecordingsForUser(userId: string): Promise<RecordingIt
  * Streams a recording's audio bytes from RingCentral. The browser hits our
  * proxy endpoint instead of RingCentral directly, because the recording
  * URL requires the account's bearer token, which is server-only.
+ *
+ * Forwards a Range header through to RingCentral so the browser can seek
+ * to a specific time in the audio. Returns the upstream status code (200
+ * for full content, 206 for partial content when a Range is honored).
  */
 export async function fetchRecordingStream(
   accountId: string,
   recordingId: string,
-): Promise<{ status: number; contentType: string; body: ReadableStream<Uint8Array> | null }> {
+  rangeHeader?: string,
+): Promise<{
+  status: number;
+  contentType: string;
+  contentLength: string | null;
+  contentRange: string | null;
+  acceptRanges: string | null;
+  body: ReadableStream<Uint8Array> | null;
+}> {
   const token = await getValidAccessToken(accountId);
+  const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+  if (rangeHeader) headers.Range = rangeHeader;
   const res = await fetch(
     `${env.RINGCENTRAL_SERVER}/restapi/v1.0/account/~/recording/${encodeURIComponent(recordingId)}/content`,
-    { headers: { Authorization: `Bearer ${token}` } },
+    { headers },
   );
   return {
     status: res.status,
     contentType: res.headers.get('content-type') ?? 'audio/mpeg',
+    contentLength: res.headers.get('content-length'),
+    contentRange: res.headers.get('content-range'),
+    acceptRanges: res.headers.get('accept-ranges'),
     body: res.body,
   };
 }

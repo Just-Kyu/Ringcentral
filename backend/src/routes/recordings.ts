@@ -38,16 +38,25 @@ router.get('/:accountId/:recordingId/audio', async (req, res) => {
       res.status(404).json({ error: 'Recording not found' });
       return;
     }
-    const stream = await fetchRecordingStream(accountId, recordingId);
-    if (stream.status !== 200 || !stream.body) {
+    // Pass the browser's Range header through so seek (15s/30s skip,
+    // dragging the scrubber) hits a partial-content fetch instead of
+    // pulling the whole file each time.
+    const rangeHeader = typeof req.headers.range === 'string' ? req.headers.range : undefined;
+    const stream = await fetchRecordingStream(accountId, recordingId, rangeHeader);
+    if ((stream.status !== 200 && stream.status !== 206) || !stream.body) {
       res.status(stream.status === 404 ? 404 : 502).json({
         error: stream.status === 404 ? 'Recording not available' : 'Recording fetch failed',
       });
       return;
     }
-    res.status(200);
+    res.status(stream.status);
     res.setHeader('Content-Type', stream.contentType);
     res.setHeader('Cache-Control', 'private, max-age=300');
+    // Always advertise byte-range support so browsers know they can seek.
+    res.setHeader('Accept-Ranges', stream.acceptRanges ?? 'bytes');
+    if (stream.contentLength) res.setHeader('Content-Length', stream.contentLength);
+    if (stream.contentRange) res.setHeader('Content-Range', stream.contentRange);
+
     // Pipe the WHATWG ReadableStream into the Express response.
     const reader = stream.body.getReader();
     const pump = async () => {
