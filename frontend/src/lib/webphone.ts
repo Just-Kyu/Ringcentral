@@ -72,6 +72,24 @@ function localAudioTracks(session: SipSession): MediaStreamTrack[] {
   return tracks;
 }
 
+/**
+ * Remote audio tracks — the bytes RingCentral streams to us. Disabling these
+ * is how we silence music-on-hold coming back from a held call so it doesn't
+ * bleed into the user's speakers while they talk on a different active call.
+ */
+function remoteAudioTracks(session: SipSession): MediaStreamTrack[] {
+  const pc =
+    session.peerConnection ??
+    session.sessionDescriptionHandler?.peerConnection ??
+    (session as unknown as { _peerConnection?: RTCPeerConnection })._peerConnection;
+  if (!pc || typeof pc.getReceivers !== 'function') return [];
+  const tracks: MediaStreamTrack[] = [];
+  for (const receiver of pc.getReceivers()) {
+    if (receiver.track && receiver.track.kind === 'audio') tracks.push(receiver.track);
+  }
+  return tracks;
+}
+
 interface UserAgent {
   on: (event: string, listener: (session: SipSession) => void) => void;
   off?: (event: string, listener: (session: SipSession) => void) => void;
@@ -358,6 +376,15 @@ export async function createWebPhone(
     async hold(callId, on) {
       const s = sessionsByCallId.get(callId);
       if (!s) return;
+      // Silence the held party's incoming audio (music-on-hold) on our side
+      // so it doesn't bleed into whatever active call the user is now on.
+      // We do this regardless of whether session.hold() succeeds; on resume
+      // we re-enable so the user hears the other party again.
+      for (const t of remoteAudioTracks(s)) t.enabled = !on;
+      // Also stop sending our audio while the call is held — most SIP
+      // stacks already handle this via re-INVITE, but toggling the local
+      // track is a defensive belt-and-suspenders.
+      for (const t of localAudioTracks(s)) t.enabled = !on;
       try {
         if (on) {
           if (typeof s.hold === 'function') await Promise.resolve(s.hold());
